@@ -1,0 +1,187 @@
+@import 'tailwindcss';
+
+/**
+ * A dark, quiet workspace.
+ *
+ * The macOS app sits on system materials and an accent colour; the equivalent
+ * here is one neutral ramp and one accent, so the only saturated things on
+ * screen are the controls that matter and the face boxes that say what is about
+ * to be replaced.
+ */
+@theme {
+  --color-ink-950: #08090c;
+  --color-ink-900: #0d0f14;
+  --color-ink-850: #12151c;
+  --color-ink-800: #171b24;
+  --color-ink-700: #1f2430;
+  --color-ink-600: #2b3140;
+  --color-ink-500: #3d4454;
+  --color-ink-400: #5b6377;
+  --color-ink-300: #8992a6;
+  --color-ink-200: #b7bfd0;
+  --color-ink-100: #e4e8f0;
+
+  --color-accent-600: #4c6ef5;
+  --color-accent-500: #5c7cfa;
+  --color-accent-400: #748ffc;
+  --color-accent-300: #91a7ff;
+
+  --color-warn-500: #f59f00;
+  --color-good-500: #37b24d;
+  --color-bad-500: #f03e3e;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'SF Pro Text', 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--color-ink-950);
+    color: var(--color-ink-100);
+    font-family: var(--font-sans);
+    /* iOS Safari: keeps the export bar visible when the URL bar collapses. */
+    min-height: 100dvh;
+    overscroll-behavior-y: none;
+  }
+
+  /*
+   * The wash lives on a fixed layer rather than on `body`, so it is sized by the
+   * viewport instead of by the document. Painted on `body` it seams visibly
+   * wherever the page is taller than one screen — the gradients simply run out.
+   */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(1200px 600px at 12% -10%, #16203a 0%, transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, #1a1630 0%, transparent 55%);
+  }
+
+  /* The canvas is a drop target for whole files; text selection fights it. */
+  ::selection {
+    background: var(--color-accent-600);
+    color: white;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent-400);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  /*
+   * One slider style for every slider. Native range inputs are the only control
+   * here that cannot be styled through utilities alone, and having them differ
+   * between Chromium and WebKit would be the most visible inconsistency in the
+   * app.
+   */
+  .ff-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 22px;
+    background: transparent;
+    cursor: pointer;
+    touch-action: pan-y;
+  }
+
+  .ff-slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--color-accent-500) 0%,
+      var(--color-accent-500) var(--ff-fill, 50%),
+      var(--color-ink-600) var(--ff-fill, 50%),
+      var(--color-ink-600) 100%
+    );
+  }
+
+  .ff-slider::-moz-range-track {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--color-ink-600);
+  }
+
+  .ff-slider::-moz-range-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--color-accent-500);
+  }
+
+  .ff-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -6px;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid rgb(0 0 0 / 0.25);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.5);
+    transition: transform 120ms ease;
+  }
+
+  .ff-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid rgb(0 0 0 / 0.25);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.5);
+  }
+
+  .ff-slider:active::-webkit-slider-thumb {
+    transform: scale(1.15);
+  }
+
+  .ff-slider:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .ff-panel {
+    background: color-mix(in srgb, var(--color-ink-900) 82%, transparent);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+  }
+
+  .ff-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-600) transparent;
+  }
+
+  .ff-scroll::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .ff-scroll::-webkit-scrollbar-thumb {
+    background: var(--color-ink-700);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
