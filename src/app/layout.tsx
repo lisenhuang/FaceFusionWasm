@@ -10,7 +10,12 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: '#08090c',
+  // Matches `--color-ink-950` in each appearance, so the iOS status bar and the
+  // Android chrome sit flush against the page instead of banding against it.
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#f7f8fc' },
+    { media: '(prefers-color-scheme: dark)', color: '#08090c' },
+  ],
   width: 'device-width',
   initialScale: 1,
   // The preview canvas is pinch-zoomable content; blocking that would make
@@ -21,7 +26,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="en" className="h-full">
       <body className="min-h-full">{children}</body>
     </html>
   )

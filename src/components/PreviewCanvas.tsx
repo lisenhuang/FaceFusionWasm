@@ -116,21 +116,35 @@ export function PreviewCanvas() {
         >
           {previewFaces.map((face) => {
             const active = selected.has(face.index)
+            const width = active ? 2.5 : 1.2
+            const box = {
+              x: face.box.x,
+              y: face.box.y,
+              width: face.box.width,
+              height: face.box.height,
+              rx: Math.max(4, face.box.width * 0.06),
+              fill: 'none',
+              // `non-scaling-stroke` already reads the width in screen pixels,
+              // so it needs no correction for the frame's own scale.
+              vectorEffect: 'non-scaling-stroke',
+            } as const
             return (
-              <rect
-                key={face.index}
-                x={face.box.x}
-                y={face.box.y}
-                width={face.box.width}
-                height={face.box.height}
-                rx={Math.max(4, face.box.width * 0.06)}
-                fill="none"
-                stroke={active ? 'var(--color-accent-400)' : 'rgba(255,255,255,0.35)'}
-                // `non-scaling-stroke` already reads this in screen pixels, so
-                // it needs no correction for the frame's own scale.
-                strokeWidth={active ? 2.5 : 1.2}
-                vectorEffect="non-scaling-stroke"
-              />
+              // Drawn twice: a dark halo first, then the line on top of it. The
+              // box lies on the footage, and one stroke cannot be seen against
+              // both a bright sky and dark hair — but a light line with a dark
+              // edge can, whichever of the two it happens to cross.
+              <g key={face.index}>
+                <rect
+                  {...box}
+                  stroke="var(--ff-face-halo)"
+                  strokeWidth={width + 2}
+                />
+                <rect
+                  {...box}
+                  stroke={active ? 'var(--ff-face-selected)' : 'var(--ff-face-outline)'}
+                  strokeWidth={width}
+                />
+              </g>
             )
           })}
         </svg>

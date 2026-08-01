@@ -1,12 +1,22 @@
 @import 'tailwindcss';
 
 /**
- * A dark, quiet workspace.
+ * A quiet workspace, in whichever appearance the system is set to.
  *
  * The macOS app sits on system materials and an accent colour; the equivalent
  * here is one neutral ramp and one accent, so the only saturated things on
  * screen are the controls that matter and the face boxes that say what is about
  * to be replaced.
+ *
+ * The ramp is ordered by role, not by lightness: `ink-950` is always the page,
+ * `ink-900` always the panels, `ink-100` always the primary text. That is what
+ * makes light mode a change of eleven values here rather than a `dark:` prefix
+ * on every element — the light ramp below simply runs the other way.
+ *
+ * There is no appearance switch in the UI, and deliberately so. The system
+ * already knows the answer, `prefers-color-scheme` already asks it, and a
+ * preference stored per-site would be one more thing this app remembers about
+ * someone whose whole promise is that it remembers nothing.
  */
 @theme {
   --color-ink-950: #08090c;
@@ -25,6 +35,7 @@
   --color-accent-500: #5c7cfa;
   --color-accent-400: #748ffc;
   --color-accent-300: #91a7ff;
+  --color-accent-200: #adc0ff;
 
   --color-warn-500: #f59f00;
   --color-good-500: #37b24d;
@@ -37,10 +48,94 @@
     ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
+/*
+ * The handful of colours that cannot come from the ramp.
+ *
+ * The face outline is the one thing here that deliberately ignores the
+ * appearance, because it is not drawn on the app — it is drawn on the user's
+ * footage, and footage has no appearance setting. A single colour cannot
+ * survive that: a white box disappears against a bright background and a dark
+ * one disappears into dark hair, which is exactly what a light theme with a
+ * dark outline turned out to do. So the box is drawn twice, a dark halo under a
+ * light line, and it stays legible over anything.
+ */
+:root {
+  --ff-face-outline: rgb(255 255 255 / 0.75);
+  --ff-face-halo: rgb(0 0 0 / 0.45);
+  /*
+   * The bright accent in both appearances, and not `--color-accent-400`, which
+   * darkens in light mode for the sake of white backgrounds it will never be
+   * drawn on here.
+   */
+  --ff-face-selected: #748ffc;
+  --ff-thumb-border: rgb(0 0 0 / 0.25);
+  --ff-thumb-shadow: 0 1px 3px rgb(0 0 0 / 0.5);
+  --ff-wash:
+    radial-gradient(1200px 600px at 12% -10%, #16203a 0%, transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, #1a1630 0%, transparent 55%);
+}
+
+/*
+ * Light mode. Unlayered on purpose: Tailwind emits `@theme` into the `theme`
+ * cascade layer, and anything unlayered beats a layer no matter the order, so
+ * these win without needing to out-specify `:root`.
+ */
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-ink-950: #f7f8fc;
+    --color-ink-900: #ffffff;
+    --color-ink-850: #f1f3f9;
+    --color-ink-800: #e0e5f0;
+    --color-ink-700: #d2d8e5;
+    --color-ink-600: #bfc6d6;
+    --color-ink-500: #858da0;
+    --color-ink-400: #666e82;
+    --color-ink-300: #4d5566;
+    --color-ink-200: #333b4b;
+    --color-ink-100: #11141b;
+
+    /*
+     * The blues darken rather than mirror. A ramp can be read upside down; a
+     * hue cannot — #748ffc is a legible accent on near-black and a barely
+     * visible one on near-white, so each step moves down until it carries the
+     * same weight against the new background.
+     */
+    --color-accent-600: #3b5bdb;
+    --color-accent-500: #4263eb;
+    --color-accent-400: #3b5bdb;
+    --color-accent-300: #364fc7;
+    --color-accent-200: #2b3f9e;
+
+    /* Amber and green are the two that fail outright on white. */
+    --color-warn-500: #b05a00;
+    --color-good-500: #2b8a3e;
+    --color-bad-500: #c92a2a;
+
+    --ff-thumb-border: rgb(0 0 0 / 0.14);
+    --ff-thumb-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
+    --ff-wash:
+      radial-gradient(1200px 600px at 12% -10%, #dfe6ff 0%, transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, #ece2ff 0%, transparent 55%);
+  }
+}
+
 @layer base {
   html {
-    color-scheme: dark;
+    /* Both, so form controls, scrollbars and the caret follow the system too. */
+    color-scheme: light dark;
     -webkit-text-size-adjust: 100%;
+  }
+
+  /*
+   * Smoothed only against the dark background. Antialiasing thins a glyph,
+   * which is a correction for light-on-dark bloom and a defect anywhere else —
+   * on white it just makes the text look underweight.
+   */
+  @media (prefers-color-scheme: dark) {
+    html {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
   }
 
   body {
@@ -63,9 +158,7 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background:
-      radial-gradient(1200px 600px at 12% -10%, #16203a 0%, transparent 60%),
-      radial-gradient(900px 500px at 100% 0%, #1a1630 0%, transparent 55%);
+    background: var(--ff-wash);
   }
 
   /* The canvas is a drop target for whole files; text selection fights it. */
@@ -130,8 +223,8 @@
     margin-top: -6px;
     border-radius: 999px;
     background: #fff;
-    border: 1px solid rgb(0 0 0 / 0.25);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.5);
+    border: 1px solid var(--ff-thumb-border);
+    box-shadow: var(--ff-thumb-shadow);
     transition: transform 120ms ease;
   }
 
@@ -140,8 +233,8 @@
     height: 16px;
     border-radius: 999px;
     background: #fff;
-    border: 1px solid rgb(0 0 0 / 0.25);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.5);
+    border: 1px solid var(--ff-thumb-border);
+    box-shadow: var(--ff-thumb-shadow);
   }
 
   .ff-slider:active::-webkit-slider-thumb {
