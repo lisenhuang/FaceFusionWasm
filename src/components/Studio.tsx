@@ -20,7 +20,7 @@ import { ActionBar } from './ActionBar'
 import { PreviewCanvas } from './PreviewCanvas'
 import { Scrubber } from './Scrubber'
 import { SettingsPanel } from './SettingsPanel'
-import { IconSparkles, cx } from './ui'
+import { GitHubLink, IconSparkles, cx } from './ui'
 
 export function Studio() {
   const handleDrop = useStore((state) => state.handleDrop)
@@ -123,6 +123,9 @@ function Header() {
           Everything runs on this device
         </p>
       </div>
+      {/* Pushed to the end of the row: the title stays put whatever the sidebar
+          is doing, and the link sits where a window's trailing control would. */}
+      <GitHubLink className="-mr-1 ml-auto" />
     </div>
   )
 }

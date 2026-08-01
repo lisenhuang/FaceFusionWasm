@@ -12,7 +12,7 @@ React page  ──postMessage──▶  engine.worker.ts  ──▶  ONNX Runtim
    └── the only thing that ever touches the network is the one-time model download
 ```
 
-This is a port of [FaceFusionMac](../FaceFusionMac), and it keeps that app's
+This is a port of FaceFusionMac, and it keeps that app's
 interface and its pipeline. What changed is the substrate: XPC became a worker,
 Core ML became WebGPU, AVFoundation became WebCodecs, and the App Group container
 became the Origin Private File System.
