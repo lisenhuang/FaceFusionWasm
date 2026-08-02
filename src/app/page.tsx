@@ -1,114 +1,208 @@
-'use client'
-
 /**
- * page.tsx
+ * The landing page for the iOS and macOS apps.
  *
- * Routes between first-run model installation and the studio, and does the one
- * thing that has to happen before either: check that the browser can actually do
- * this at all.
+ * A *server* component, unlike everything else in this app. That is the point:
+ * the studio is a client component that renders a spinner until WebGPU and a
+ * worker are up, so a crawler reading `/` used to learn nothing at all about
+ * the product. This page is the text a search engine and an answer engine
+ * actually get to read.
  *
- * The whole app is a client component by necessity — every capability it relies
- * on (workers, WebGPU, WebCodecs, OPFS) exists only in a browser, and there is
- * no server-rendered version of any of it worth showing.
+ * It describes the iOS and macOS apps only. The browser build still exists at
+ * `/studio`, but it is not mentioned here, not linked from here, and not in the
+ * sitemap — see `APP_STORE_URL` in `lib/site.ts` for why.
  */
 
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import type { Metadata } from 'next'
+import Link from 'next/link'
+import type { ReactNode } from 'react'
 
-import { Onboarding } from '@/components/Onboarding'
-import { Studio } from '@/components/Studio'
-import { IconSparkles, IconWarning, Spinner } from '@/components/ui'
-import { useStore } from '@/lib/store'
+import { APP_STORE_URL, SITE_DESCRIPTION, SITE_NAME, SITE_URL, absoluteURL } from '@/lib/site'
+
+const TITLE = 'Morphiqo — on-device face swap for iPhone, iPad and Mac'
+
+export const metadata: Metadata = {
+  title: { absolute: TITLE },
+  description: SITE_DESCRIPTION,
+  alternates: { canonical: '/' },
+  openGraph: { title: TITLE, description: SITE_DESCRIPTION, url: '/' },
+}
 
 /**
- * Which of the capabilities the app is built on this browser actually has.
- *
- * Computed once and cached: `useSyncExternalStore` re-reads the snapshot on
- * every render and compares it by identity, so returning a fresh array would
- * loop. The server snapshot is `null`, which renders the splash — there is no
- * meaningful server-side answer to "does your browser have WebCodecs".
+ * What an answer engine reads when it wants facts rather than prose. Declared
+ * here rather than in the layout so it describes the shipping apps — the layout
+ * covers every route, including ones that are not the product.
  */
-let cachedSupport: string[] | null = null
-
-function missingCapabilities(): string[] {
-  if (cachedSupport) return cachedSupport
-  const missing: string[] = []
-  if (typeof Worker === 'undefined') missing.push('Web Workers')
-  if (!navigator.storage?.getDirectory) missing.push('Origin Private File System')
-  if (typeof VideoEncoder === 'undefined' || typeof VideoDecoder === 'undefined') {
-    missing.push('WebCodecs')
-  }
-  if (typeof OffscreenCanvas === 'undefined') missing.push('OffscreenCanvas')
-  cachedSupport = missing
-  return missing
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'MobileApplication',
+  '@id': absoluteURL('/#app'),
+  name: SITE_NAME,
+  url: SITE_URL,
+  installUrl: APP_STORE_URL,
+  applicationCategory: 'MultimediaApplication',
+  applicationSubCategory: 'Photo & video editing',
+  operatingSystem: 'iOS 17 or later, iPadOS 17 or later, macOS 14 or later',
+  description: SITE_DESCRIPTION,
+  featureList: [
+    'Swap faces in video and in photos',
+    'Runs entirely on the device — no upload, no server, no account',
+    'Works offline after a one-time model download',
+    'Choose which face in a scene is replaced',
+    'Optional detail enhancement on the swapped face',
+  ],
+  privacyPolicy: absoluteURL('/privacy'),
+  termsOfService: absoluteURL('/terms'),
 }
 
-const subscribeToNothing = () => () => {}
-
-export default function Page() {
-  const missing = useSyncExternalStore(
-    subscribeToNothing,
-    missingCapabilities,
-    () => null,
-  )
-  const [booted, setBooted] = useState(false)
-  const modelsReady = useStore((state) => state.modelsReady)
-  // The required models land before the optional ones, so `modelsReady` flips
-  // partway through an install. Switching screens at that moment would hide the
-  // progress bar for a download the user was told was 903 MB and has only seen
-  // half of.
-  const installing = useStore((state) => state.library?.isWorking ?? false)
-  const boot = useStore((state) => state.boot)
-
-  useEffect(() => {
-    if (missingCapabilities().length > 0) return
-    void boot().finally(() => setBooted(true))
-  }, [boot])
-
-  if (missing === null) return <Splash />
-  if (missing.length > 0) return <Unsupported missing={missing} />
-  if (!booted) return <Splash />
-
-  return modelsReady && !installing ? <Studio /> : <Onboarding />
-}
-
-function Splash() {
+export default function HomePage() {
   return (
-    <div className="grid h-dvh place-items-center">
-      <div className="flex flex-col items-center gap-3 text-ink-400">
-        <span className="grid h-14 w-14 place-items-center rounded-2xl bg-accent-600/12 ring-1 ring-accent-600/25">
-          <IconSparkles className="h-6 w-6 text-accent-400" />
-        </span>
-        <span className="flex items-center gap-2 text-[13px]">
-          <Spinner className="h-3.5 w-3.5" />
-          Starting…
-        </span>
-      </div>
+    <div className="min-h-dvh">
+      <script
+        type="application/ld+json"
+        // A literal defined above; nothing user-supplied reaches it.
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
+
+      <header className="mx-auto flex max-w-3xl items-center gap-2.5 px-6 pt-8 sm:pt-12">
+        <Mark />
+        <span className="text-[15px] font-semibold text-ink-100">Morphiqo</span>
+      </header>
+
+      <main className="mx-auto max-w-3xl px-6 pb-24 pt-14 sm:pt-20">
+        <h1 className="text-balance text-[34px] font-semibold leading-[1.1] tracking-tight text-ink-100 sm:text-[46px]">
+          Face swapping that never leaves your device
+        </h1>
+        <p className="mt-5 max-w-xl text-balance text-[16px] leading-relaxed text-ink-300 sm:text-[17px]">
+          Morphiqo swaps faces in videos and photos on your iPhone, iPad or Mac. The work
+          happens on your own hardware — nothing is uploaded, because there is no server to
+          upload it to.
+        </p>
+
+        <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+          <StoreButton href={APP_STORE_URL} primary>
+            Download for iPhone &amp; iPad
+          </StoreButton>
+          <StoreButton href={APP_STORE_URL}>Download for Mac</StoreButton>
+        </div>
+        <p className="mt-4 text-[13px] text-ink-400">
+          Requires iOS 17 or later, or macOS 14 or later. Apple silicon and Intel Macs are
+          both supported.
+        </p>
+
+        <section className="mt-20 grid gap-x-10 gap-y-12 sm:grid-cols-2">
+          <Feature title="Nothing is uploaded">
+            Detection, matching, swapping and enhancement all run locally. Your photos and
+            videos are never transmitted, and no account is ever created — there is nothing
+            to sign up for and nothing to sign in to.
+          </Feature>
+          <Feature title="Works offline">
+            The app fetches its AI models once, then works with the network switched off
+            entirely. On a plane, on a train, or with the radio off — it behaves the same.
+          </Feature>
+          <Feature title="Video, not just stills">
+            Swap a face across an entire clip, with the audio carried through untouched.
+            Scrub the result before you commit to exporting it.
+          </Feature>
+          <Feature title="You choose the face">
+            When a scene has several people in it, pick the one to replace rather than
+            hoping the automatic match agrees with you.
+          </Feature>
+          <Feature title="Exports stay anonymous">
+            A finished file carries no tag saying what produced it, and the original
+            photo&rsquo;s location and camera metadata do not survive the swap.
+          </Feature>
+          <Feature title="Built for both platforms">
+            The iPhone, iPad and Mac apps run the same pipeline and are checked against
+            each other, so the same inputs give you the same result.
+          </Feature>
+        </section>
+
+        <section className="mt-20 rounded-2xl bg-ink-900/60 p-6 ring-1 ring-ink-800 sm:p-8">
+          <h2 className="text-[19px] font-semibold text-ink-100">
+            Only swap faces of people who have agreed to it
+          </h2>
+          <p className="mt-3 text-[14.5px] leading-relaxed text-ink-300">
+            Morphiqo alters images of real people. You are responsible for having the right
+            to use the media you process and for what you do with the result. The{' '}
+            <Link href="/terms" className="text-accent-400 hover:underline">
+              terms of use
+            </Link>{' '}
+            set out what that means.
+          </p>
+        </section>
+
+        <footer className="mt-16 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-ink-800 pt-6 text-[13px] text-ink-400">
+          <span>© {2026} Morphiqo</span>
+          <Link href="/support" className="hover:text-ink-100">
+            Support
+          </Link>
+          <Link href="/privacy" className="hover:text-ink-100">
+            Privacy
+          </Link>
+          <Link href="/terms" className="hover:text-ink-100">
+            Terms
+          </Link>
+        </footer>
+      </main>
     </div>
   )
 }
 
-function Unsupported({ missing }: { missing: string[] }) {
+function Feature({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <main className="mx-auto grid h-dvh max-w-lg place-items-center px-6">
-      <div className="flex flex-col items-center gap-4 text-center">
-        <span className="grid h-14 w-14 place-items-center rounded-2xl bg-warn-500/10 ring-1 ring-warn-500/25">
-          <IconWarning className="h-6 w-6 text-warn-500" />
-        </span>
-        <h1 className="text-xl font-semibold">This browser is missing some pieces</h1>
-        <p className="text-[13.5px] leading-relaxed text-ink-300">
-          Face swapping runs entirely on your device, which needs a few recent browser
-          features. This one does not have {formatList(missing)}.
-        </p>
-        <p className="text-[12.5px] text-ink-400">
-          Chrome or Edge 121+, Safari 17+, or a recent Chrome on Android will work. There
-          is no server-side fallback, by design.
-        </p>
-      </div>
-    </main>
+    <div className="flex flex-col gap-2">
+      <h2 className="text-[16px] font-semibold text-ink-100">{title}</h2>
+      <p className="text-[14.5px] leading-relaxed text-ink-300">{children}</p>
+    </div>
   )
 }
 
-function formatList(items: string[]): string {
-  if (items.length === 1) return items[0]
-  return `${items.slice(0, -1).join(', ')} or ${items[items.length - 1]}`
+/**
+ * A plain styled link rather than Apple's official badge artwork, which has its
+ * own brand guidelines and has to be used unmodified and at approved sizes. Drop
+ * the real badges in here when you are ready to follow them.
+ */
+function StoreButton({
+  href,
+  primary,
+  children,
+}: {
+  href: string
+  primary?: boolean
+  children: ReactNode
+}) {
+  return (
+    <a
+      href={href}
+      className={[
+        'inline-flex items-center justify-center rounded-xl px-6 py-3.5 text-[15px] font-medium',
+        'transition-colors',
+        primary
+          ? 'bg-accent-600 text-white hover:bg-accent-500'
+          : 'bg-ink-800 text-ink-100 ring-1 ring-ink-700 hover:bg-ink-700',
+      ].join(' ')}
+    >
+      {children}
+    </a>
+  )
+}
+
+function Mark() {
+  return (
+    <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent-600/15 ring-1 ring-accent-600/25">
+      <svg
+        viewBox="0 0 24 24"
+        className="h-4.5 w-4.5 text-accent-400"
+        aria-hidden
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M12 3.5 13.7 9l5.3 1.7-5.3 1.7L12 18l-1.7-5.6L5 10.7 10.3 9 12 3.5Z" />
+        <path d="M18.5 4v3M20 5.5h-3M5.5 16v2.5M6.75 17.25h-2.5" />
+      </svg>
+    </span>
+  )
 }

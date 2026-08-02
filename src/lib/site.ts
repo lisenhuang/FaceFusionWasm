@@ -29,7 +29,17 @@ export const SITE_NAME = 'Morphiqo'
  * the ~155 characters Google will render before truncating.
  */
 export const SITE_DESCRIPTION =
-  'Swap faces in videos and photos entirely on your own device. Morphiqo runs offline in your browser, iPhone or Mac — your media is never uploaded.'
+  'Swap faces in videos and photos entirely on your iPhone, iPad or Mac. Morphiqo works offline and never uploads your media — there is no server.'
+
+/**
+ * One App Store record covers both platforms, so both buttons point here.
+ *
+ * The landing page is about the iOS and macOS apps and nothing else. The
+ * browser build lives at `/studio` and is deliberately unadvertised — it is not
+ * linked from `/`, not in the sitemap, and marked `noindex`.
+ */
+export const APP_STORE_ID = '6797135085'
+export const APP_STORE_URL = `https://apps.apple.com/app/id${APP_STORE_ID}`
 
 /** Absolute URL for a site-relative path. */
 export function absoluteURL(path: string): string {

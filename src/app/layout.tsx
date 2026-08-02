@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   // The default carries the keywords a cold search needs; the template keeps
   // the brand on every other page without each one repeating it.
   title: {
-    default: 'Morphiqo — on-device face swap for video and photos',
+    default: 'Morphiqo — on-device face swap for iPhone, iPad and Mac',
     template: `%s — ${SITE_NAME}`,
   },
   description: SITE_DESCRIPTION,
@@ -30,9 +30,10 @@ export const metadata: Metadata = {
     'video face swap',
     'photo face swap',
     'deepfake alternative',
-    'browser face swap',
-    'iOS face swap app',
+    'iPhone face swap app',
+    'iPad face swap app',
     'Mac face swap app',
+    'face swap without upload',
   ],
 
   authors: [{ name: 'Lisen Huang' }],
@@ -45,14 +46,14 @@ export const metadata: Metadata = {
     type: 'website',
     siteName: SITE_NAME,
     url: SITE_URL,
-    title: 'Morphiqo — on-device face swap for video and photos',
+    title: 'Morphiqo — on-device face swap for iPhone, iPad and Mac',
     description: SITE_DESCRIPTION,
     locale: 'en_US',
   },
 
   twitter: {
     card: 'summary_large_image',
-    title: 'Morphiqo — on-device face swap for video and photos',
+    title: 'Morphiqo — on-device face swap for iPhone, iPad and Mac',
     description: SITE_DESCRIPTION,
   },
 
@@ -88,47 +89,21 @@ export const viewport: Viewport = {
 }
 
 /**
- * What an answer engine reads when it wants facts rather than prose.
+ * Site-level identity only.
  *
- * The studio at `/` is a client component that renders almost no text, so a
- * crawler that only reads the DOM learns very little about what this is. This
- * is where the product is actually described in a form a machine can quote:
- * what it does, which platforms it runs on, and the one claim that
- * distinguishes it.
+ * The product itself is described by the `MobileApplication` node on the
+ * landing page, which is the page that actually makes claims about the apps.
+ * Duplicating those claims here would attach them to every route, including
+ * `/privacy` and the unadvertised browser build.
  */
 const structuredData = {
   '@context': 'https://schema.org',
-  '@graph': [
-    {
-      '@type': 'WebSite',
-      '@id': absoluteURL('/#website'),
-      url: SITE_URL,
-      name: SITE_NAME,
-      description: SITE_DESCRIPTION,
-      inLanguage: 'en',
-    },
-    {
-      '@type': 'SoftwareApplication',
-      '@id': absoluteURL('/#app'),
-      name: SITE_NAME,
-      url: SITE_URL,
-      applicationCategory: 'MultimediaApplication',
-      applicationSubCategory: 'Photo & video editing',
-      operatingSystem: 'Web browser, iOS 17 or later, macOS 14 or later',
-      description: SITE_DESCRIPTION,
-      browserRequirements:
-        'Requires WebGPU or WebAssembly, Web Workers, WebCodecs and the Origin Private File System. Chrome or Edge 121+, Safari 17+.',
-      featureList: [
-        'Swap faces in video and in photos',
-        'Runs entirely on the device — no upload, no server, no account',
-        'Works offline after a one-time model download',
-        'Optional detail enhancement on the swapped face',
-        'Choose which face in a scene is replaced',
-      ],
-      privacyPolicy: absoluteURL('/privacy'),
-      termsOfService: absoluteURL('/terms'),
-    },
-  ],
+  '@type': 'WebSite',
+  '@id': absoluteURL('/#website'),
+  url: SITE_URL,
+  name: SITE_NAME,
+  description: SITE_DESCRIPTION,
+  inLanguage: 'en',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

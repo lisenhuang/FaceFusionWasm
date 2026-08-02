@@ -4,9 +4,7 @@
 > Nothing is uploaded: there is no server, no account and no copy of the user's
 > media anywhere but their own hardware.
 
-Morphiqo ships as three implementations of one pipeline — a web app that runs in
-the browser, an iOS app, and a macOS app — and they are meant to produce the same
-result from the same inputs.
+Morphiqo is an app for iPhone, iPad and Mac, distributed through the App Store.
 
 ## How it works
 
@@ -15,16 +13,12 @@ result from the same inputs.
 - The AI models are too large to ship inside the app, so on first launch it
   downloads roughly 900 MB once, over HTTPS. Every byte is checked against a
   SHA-256 digest before use.
-- After that download, the iOS and macOS apps work with the network switched off
-  entirely. The web version needs the network only to load the page.
+- After that download, the app works with the network switched off entirely.
 
 ## Requirements
 
-- Web: Chrome or Edge 121+, Safari 17+, or a recent Chrome on Android. Needs Web
-  Workers, WebCodecs, OffscreenCanvas and the Origin Private File System. There
-  is no server-side fallback.
-- iOS: iOS 17 or later.
-- macOS: macOS 14 or later, Apple silicon or Intel.
+- iPhone and iPad: iOS 17 or later.
+- Mac: macOS 14 or later, Apple silicon or Intel.
 
 ## Privacy
 
@@ -32,17 +26,20 @@ result from the same inputs.
 - Photos and videos are never transmitted. Face embeddings are computed on the
   device, held in memory for the current job only, and discarded — they are never
   stored, never profiled and never compared against any database of people.
-- The website counts page views in aggregate, cookielessly. The iOS and macOS
-  apps contain no analytics of any kind.
+- Exported files carry no tag identifying the app that produced them, and the
+  original photo's location and camera metadata do not survive the swap.
+- This website counts page views in aggregate, cookielessly. The apps themselves
+  contain no analytics of any kind.
 
 ## Responsible use
 
-The face-swapping models are published for non-commercial research use. Only
-swap faces of people who have agreed to it.
+Morphiqo alters images of real people. Only swap faces of people who have agreed
+to it. Some of the underlying AI models are licensed for non-commercial research
+use.
 
 ## Pages
 
-- [Morphiqo](/): the app itself — face swapping in the browser
+- [Morphiqo](/): what the app does, and where to download it
 - [Support](/support): common questions, device requirements, troubleshooting
 - [Privacy Policy](/privacy): exactly what is and is not collected
 - [Terms of Use](/terms): acceptable use, model licences, warranty and liability
