@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'FaceFusion Web — local face swapping',
+  title: 'Morphiqo — local face swapping',
   description:
     'Swap faces in video and photos entirely in your browser. Your media never leaves your device.',
-  applicationName: 'FaceFusion Web',
+  applicationName: 'Morphiqo',
   robots: { index: true, follow: true },
 }
 

@@ -118,7 +118,7 @@ function Header() {
         <IconSparkles className="h-4 w-4 text-accent-400" />
       </span>
       <div className="min-w-0">
-        <h1 className="text-[13.5px] font-semibold leading-tight">FaceFusion</h1>
+        <h1 className="text-[13.5px] font-semibold leading-tight">Morphiqo</h1>
         <p className="text-[10.5px] leading-tight text-ink-500">
           Everything runs on this device
         </p>

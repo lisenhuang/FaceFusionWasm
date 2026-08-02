@@ -64,7 +64,7 @@ export function Onboarding() {
           <IconSparkles className="h-8 w-8 text-accent-400" />
         </span>
         <h1 className="text-2xl font-semibold tracking-tight sm:text-[26px]">
-          Set up FaceFusion
+          Set up Morphiqo
         </h1>
         <p className="max-w-lg text-balance text-[14px] leading-relaxed text-ink-300">
           The app needs its AI models before it can run. This is a one-time download —
