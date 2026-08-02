@@ -81,6 +81,9 @@ export function DocPage({
           <Link href="/privacy" className="hover:text-ink-100">
             Privacy
           </Link>
+          <Link href="/terms" className="hover:text-ink-100">
+            Terms
+          </Link>
           <a
             href={SOURCE_URL}
             target="_blank"
