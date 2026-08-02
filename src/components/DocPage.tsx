@@ -19,7 +19,7 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 
 /** Where support mail goes. One constant, referenced by both documents. */
-export const CONTACT_EMAIL = 'lisen8018@gmail.com'
+export const CONTACT_EMAIL = 'aifydotnz+morphiqo@gmail.com'
 
 export const SOURCE_URL = 'https://github.com/lisenhuang/FaceFusionWasm'
 
