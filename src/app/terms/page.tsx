@@ -98,10 +98,9 @@ export default function TermsPage() {
 
       <Section title="The AI models and their licences">
         <p>
-          Morphiqo downloads its models from the public releases of the open-source
-          FaceFusion project. Those models are third-party works, and each carries its own
-          licence — several of them, including the face swapper and identity encoder, are
-          published for <strong>non-commercial research use only</strong>.
+          Morphiqo relies on third-party AI models, each of which carries its own licence.
+          Several of them are published for{' '}
+          <strong>non-commercial research use only</strong>.
         </p>
         <p>
           Your use of the models is subject to those licences. If you intend to use

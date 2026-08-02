@@ -39,14 +39,15 @@ export interface TransferableImage {
 
 // MARK: - Model library
 
+// Deliberately no `vendor` or `license` field. The manifest is served from
+// `public/`, so anything in it is a public statement about which models the app
+// uses — and no user-facing surface names them. See the root CLAUDE.md.
 export interface ModelDescriptor {
   id: ModelID
   url: string
   sha256: string
   bytes: number
   required: boolean
-  vendor: string
-  license: string
 }
 
 export interface ModelManifest {

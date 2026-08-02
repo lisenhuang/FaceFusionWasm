@@ -117,17 +117,15 @@ export default function PrivacyPage() {
       <Section title="The model download">
         <p>
           Morphiqo needs its AI models before it can run, and those are too large to ship
-          inside the app. On first launch it downloads them over HTTPS from the public
-          release hosting of the open-source FaceFusion project — GitHub release assets in
-          the iOS and macOS apps, and Hugging Face in the web app, which is used because
-          GitHub&rsquo;s release CDN sends no CORS headers a browser can read.
+          inside the app. On first launch it downloads them over HTTPS from third-party
+          file hosting.
         </p>
         <p>
           Every byte is checked against a SHA-256 digest before use, and anything that does
           not match is discarded. Those hosts are operated by third parties and, like any
-          web server, will see the IP address making the request. That request contains
-          nothing about you beyond what any file download involves, and none of your media
-          is part of it.
+          web server, will see the IP address making the request. That request is an
+          ordinary file download: it carries nothing about you, and none of your media is
+          part of it.
         </p>
         <p>
           After the download completes, the app works with the network switched off

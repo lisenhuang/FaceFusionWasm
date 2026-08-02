@@ -13,8 +13,8 @@ result from the same inputs.
 - Face detection, identity encoding, swapping and optional enhancement all run
   locally, using the device's own CPU, GPU or Neural Engine.
 - The AI models are too large to ship inside the app, so on first launch it
-  downloads roughly 900 MB once, over HTTPS, from the public releases of the
-  open-source FaceFusion project. Every byte is checked against a SHA-256 digest.
+  downloads roughly 900 MB once, over HTTPS. Every byte is checked against a
+  SHA-256 digest before use.
 - After that download, the iOS and macOS apps work with the network switched off
   entirely. The web version needs the network only to load the page.
 

@@ -133,12 +133,11 @@ export function Onboarding() {
 
       <div className="flex flex-col gap-3 rounded-2xl bg-ink-900/50 p-4 text-[12px] leading-relaxed text-ink-300 ring-1 ring-ink-800">
         <Note icon={<IconShield className="h-4 w-4 text-ink-400" />}>
-          Downloaded from the FaceFusion model repository and verified against a SHA-256
-          checksum before use. Anything that does not match is discarded.
+          Every file is verified against a SHA-256 checksum before use. Anything that does
+          not match is discarded.
         </Note>
         <Note icon={<IconWarning className="h-4 w-4 text-warn-500" />}>
-          The face-swapping models are published for non-commercial research use. Only swap
-          faces of people who have agreed to it.
+          Only swap faces of people who have agreed to it.
         </Note>
         <Note icon={<IconCheck className="h-4 w-4 text-good-500" />}>
           The models are stored in this browser&rsquo;s private storage. Your photos and
