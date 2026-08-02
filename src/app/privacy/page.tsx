@@ -14,7 +14,7 @@ import { DocPage, Highlight, List, MailLink, Section } from '@/components/DocPag
 export const metadata: Metadata = {
   title: 'Privacy Policy — Morphiqo',
   description:
-    'Morphiqo processes your photos and videos entirely on your device. No accounts, no analytics, no uploads.',
+    'Morphiqo processes your photos and videos entirely on your device. No accounts, no uploads, and nothing that sees your media.',
   robots: { index: true, follow: true },
 }
 
@@ -26,8 +26,9 @@ export default function PrivacyPage() {
     >
       <Highlight>
         Your photos and videos are never uploaded. There is no account to create, no
-        analytics, no telemetry, no advertising and no crash-reporting service. The app
-        contacts the network exactly once — to download the AI models — and never again.
+        advertising and no crash-reporting service, and the face swapping itself happens
+        entirely on your device. This website counts page views in aggregate; the apps do
+        not, and nothing anywhere sees your media.
       </Highlight>
 
       <Section title="What Morphiqo collects">
@@ -39,11 +40,34 @@ export default function PrivacyPage() {
         <p>Specifically, Morphiqo does not collect or transmit:</p>
         <List>
           <li>Photos, videos, or any frame or face extracted from them</li>
-          <li>Usage analytics, event logs, feature counters or session recordings</li>
+          <li>Event logs, feature counters or session recordings</li>
           <li>Crash reports or diagnostics (no third-party reporting SDK is integrated)</li>
-          <li>Device identifiers, advertising identifiers or location</li>
+          <li>Device identifiers, advertising identifiers or precise location</li>
           <li>Contacts, calendar, microphone or any data unrelated to the media you pick</li>
         </List>
+        <p>
+          The one exception is website traffic, which is measured in aggregate and is
+          described in the next section. It applies to this site only — the iOS and macOS
+          apps contain no analytics of any kind.
+        </p>
+      </Section>
+
+      <Section title="Website analytics">
+        <p>
+          This website uses Vercel Web Analytics to count page views. It is cookieless and
+          stores nothing on your device: no cookie, no local storage, no identifier that
+          would let one visit be linked to another or to you.
+        </p>
+        <p>
+          What it records is the sort of thing any web server log contains — which page was
+          viewed, the referring page, and coarse signals such as country, browser and
+          device type — held as counts rather than as a profile of a person.
+        </p>
+        <p>
+          It never sees the media you work with. That never leaves your device to begin
+          with, so there is nothing about your photos, videos or faces for any analytics to
+          collect. The iOS and macOS apps do not include it.
+        </p>
       </Section>
 
       <Section title="Your photos and videos">
@@ -85,7 +109,7 @@ export default function PrivacyPage() {
         </p>
       </Section>
 
-      <Section title="The one network request">
+      <Section title="The model download">
         <p>
           Morphiqo needs its AI models before it can run, and those are too large to ship
           inside the app. On first launch it downloads them over HTTPS from the public
