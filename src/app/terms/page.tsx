@@ -17,7 +17,7 @@ import { DocPage, Highlight, List, MailLink, Section } from '@/components/DocPag
 
 const TITLE = 'Terms of Use'
 const DESCRIPTION =
-  'The terms that apply when you use Morphiqo, including acceptable use of face-swapping and the licences covering its AI models.'
+  'The terms that apply when you use Morphiqo, including acceptable use of face-swapping, warranty and limitation of liability.'
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -93,20 +93,6 @@ export default function TermsPage() {
             privacy policy
           </Link>{' '}
           for exactly what the app does and does not touch.
-        </p>
-      </Section>
-
-      <Section title="The AI models and their licences">
-        <p>
-          Morphiqo relies on third-party AI models, each of which carries its own licence.
-          Several of them are published for{' '}
-          <strong>non-commercial research use only</strong>.
-        </p>
-        <p>
-          Your use of the models is subject to those licences. If you intend to use
-          Morphiqo&rsquo;s output commercially, it is on you to confirm that the licences
-          covering the models permit it. Nothing in these terms grants you rights to the
-          models beyond what their own licences give.
         </p>
       </Section>
 

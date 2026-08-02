@@ -34,12 +34,11 @@ Morphiqo is an app for iPhone, iPad and Mac, distributed through the App Store.
 ## Responsible use
 
 Morphiqo alters images of real people. Only swap faces of people who have agreed
-to it. Some of the underlying AI models are licensed for non-commercial research
-use.
+to it.
 
 ## Pages
 
 - [Morphiqo](/): what the app does, and where to download it
 - [Support](/support): common questions, device requirements, troubleshooting
 - [Privacy Policy](/privacy): exactly what is and is not collected
-- [Terms of Use](/terms): acceptable use, model licences, warranty and liability
+- [Terms of Use](/terms): acceptable use, warranty and liability
