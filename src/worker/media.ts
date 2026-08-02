@@ -245,6 +245,11 @@ export class TargetMedia {
 
     const codec = await pickVideoCodec(options.useHEVC, width, height, notes)
 
+    // An export must not say what made it, so `setMetadataTags` is never
+    // called: mediabunny writes no `udta`/`ilst` unless asked, which leaves the
+    // file without a title, an author or a "created with" tag. Adding tags here
+    // would put the product's name on a file that travels to people who did not
+    // make it.
     const output = new Output({
       format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
       target: new BufferTarget(),
