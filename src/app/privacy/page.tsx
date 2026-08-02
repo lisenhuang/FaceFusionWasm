@@ -11,10 +11,15 @@ import type { Metadata } from 'next'
 
 import { DocPage, Highlight, List, MailLink, Section } from '@/components/DocPage'
 
+const TITLE = 'Privacy Policy'
+const DESCRIPTION =
+  'Morphiqo processes your photos and videos entirely on your device. No accounts, no uploads, and nothing that sees your media.'
+
 export const metadata: Metadata = {
-  title: 'Privacy Policy — Morphiqo',
-  description:
-    'Morphiqo processes your photos and videos entirely on your device. No accounts, no uploads, and nothing that sees your media.',
+  title: TITLE,
+  description: DESCRIPTION,
+  alternates: { canonical: '/privacy' },
+  openGraph: { title: `${TITLE} — Morphiqo`, description: DESCRIPTION, url: '/privacy' },
   robots: { index: true, follow: true },
 }
 

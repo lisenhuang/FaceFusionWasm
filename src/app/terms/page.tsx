@@ -15,10 +15,15 @@ import Link from 'next/link'
 
 import { DocPage, Highlight, List, MailLink, Section } from '@/components/DocPage'
 
+const TITLE = 'Terms of Use'
+const DESCRIPTION =
+  'The terms that apply when you use Morphiqo, including acceptable use of face-swapping and the licences covering its AI models.'
+
 export const metadata: Metadata = {
-  title: 'Terms of Use — Morphiqo',
-  description:
-    'The terms that apply when you use Morphiqo, including acceptable use of face-swapping and the licences covering its AI models.',
+  title: TITLE,
+  description: DESCRIPTION,
+  alternates: { canonical: '/terms' },
+  openGraph: { title: `${TITLE} — Morphiqo`, description: DESCRIPTION, url: '/terms' },
   robots: { index: true, follow: true },
 }
 

@@ -1,0 +1,48 @@
+# Morphiqo
+
+> Morphiqo swaps faces in videos and photos entirely on the user's own device.
+> Nothing is uploaded: there is no server, no account and no copy of the user's
+> media anywhere but their own hardware.
+
+Morphiqo ships as three implementations of one pipeline — a web app that runs in
+the browser, an iOS app, and a macOS app — and they are meant to produce the same
+result from the same inputs.
+
+## How it works
+
+- Face detection, identity encoding, swapping and optional enhancement all run
+  locally, using the device's own CPU, GPU or Neural Engine.
+- The AI models are too large to ship inside the app, so on first launch it
+  downloads roughly 900 MB once, over HTTPS, from the public releases of the
+  open-source FaceFusion project. Every byte is checked against a SHA-256 digest.
+- After that download, the iOS and macOS apps work with the network switched off
+  entirely. The web version needs the network only to load the page.
+
+## Requirements
+
+- Web: Chrome or Edge 121+, Safari 17+, or a recent Chrome on Android. Needs Web
+  Workers, WebCodecs, OffscreenCanvas and the Origin Private File System. There
+  is no server-side fallback.
+- iOS: iOS 17 or later.
+- macOS: macOS 14 or later, Apple silicon or Intel.
+
+## Privacy
+
+- No accounts, no advertising, no crash-reporting SDK.
+- Photos and videos are never transmitted. Face embeddings are computed on the
+  device, held in memory for the current job only, and discarded — they are never
+  stored, never profiled and never compared against any database of people.
+- The website counts page views in aggregate, cookielessly. The iOS and macOS
+  apps contain no analytics of any kind.
+
+## Responsible use
+
+The face-swapping models are published for non-commercial research use. Only
+swap faces of people who have agreed to it.
+
+## Pages
+
+- [Morphiqo](/): the app itself — face swapping in the browser
+- [Support](/support): common questions, device requirements, troubleshooting
+- [Privacy Policy](/privacy): exactly what is and is not collected
+- [Terms of Use](/terms): acceptable use, model licences, warranty and liability
