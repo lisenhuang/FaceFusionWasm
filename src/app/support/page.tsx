@@ -10,7 +10,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 
-import { DocPage, Highlight, List, MailLink, Section, SOURCE_URL } from '@/components/DocPage'
+import { DocPage, Highlight, List, MailLink, Section } from '@/components/DocPage'
 
 export const metadata: Metadata = {
   title: 'Support — Morphiqo',
@@ -118,17 +118,10 @@ export default function SupportPage() {
 
       <Section title="Bugs and feature requests">
         <p>
-          The web version is open source. Bug reports and requests are welcome as issues
-          on{' '}
-          <a
-            href={SOURCE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent-400 hover:underline"
-          >
-            GitHub
-          </a>
-          , or by email if you would rather not open one.
+          Both are welcome by email. For a bug, the most useful things to include are what
+          you did, what happened instead, and the device and OS version it happened on — a
+          swap that goes wrong on one device and not another is usually a hardware or
+          browser difference, and knowing which narrows it down immediately.
         </p>
       </Section>
 

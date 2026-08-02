@@ -18,7 +18,6 @@ import { useStore } from '@/lib/store'
 import type { ModelDescriptor, ModelInstallState } from '@/worker/protocol'
 import {
   Button,
-  GitHubLink,
   IconCheck,
   IconDownload,
   IconShield,
@@ -55,10 +54,7 @@ export function Onboarding() {
   const working = library?.isWorking ?? false
 
   return (
-    <main className="relative mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 py-10 sm:px-8 sm:py-16">
-      {/* Out of the flow, so it cannot pull the centred header off centre. */}
-      <GitHubLink className="absolute right-3 top-3 sm:right-5 sm:top-5" />
-
+    <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 py-10 sm:px-8 sm:py-16">
       <header className="flex flex-col items-center gap-3 text-center">
         <span className="grid h-[72px] w-[72px] place-items-center rounded-2xl bg-accent-600/12 ring-1 ring-accent-600/25">
           <IconSparkles className="h-8 w-8 text-accent-400" />

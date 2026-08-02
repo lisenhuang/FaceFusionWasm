@@ -21,8 +21,6 @@ import type { ReactNode } from 'react'
 /** Where support mail goes. One constant, referenced by both documents. */
 export const CONTACT_EMAIL = 'aifydotnz+morphiqo@gmail.com'
 
-export const SOURCE_URL = 'https://github.com/lisenhuang/FaceFusionWasm'
-
 /**
  * The date shown as "last updated". Hardcoded rather than `new Date()`: a
  * policy's date is the day its *text* changed, not the day someone loaded it,
@@ -84,14 +82,6 @@ export function DocPage({
           <Link href="/terms" className="hover:text-ink-100">
             Terms
           </Link>
-          <a
-            href={SOURCE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-ink-100"
-          >
-            Source
-          </a>
         </footer>
       </main>
     </div>
