@@ -193,9 +193,19 @@ function ModelRow({
             </span>
           ) : null}
         </span>
-        <span className="block truncate text-[11.5px] text-ink-400">
-          {MODEL_PURPOSE[id]}
-        </span>
+        {/* A failure replaces the purpose rather than sitting beside it. What a
+            model is for stops being the useful sentence the moment it did not
+            download, and the reason it did not is the only thing that tells a
+            refused ranged request apart from a checksum that did not match —
+            for the user deciding whether to retry, and for anyone reading a
+            screenshot of this row. Not truncated, for the same reason. */}
+        {state.kind === 'failed' ? (
+          <span className="block text-[11.5px] text-warn-500">{state.message}</span>
+        ) : (
+          <span className="block truncate text-[11.5px] text-ink-400">
+            {MODEL_PURPOSE[id]}
+          </span>
+        )}
       </span>
 
       <span className="shrink-0 text-right text-[12px] tabular-nums text-ink-400">

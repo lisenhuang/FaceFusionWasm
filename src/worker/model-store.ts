@@ -72,6 +72,34 @@ const DIGEST_PREFIX_LENGTH = 16
  */
 const ADOPTION_RECORD = 'adopted.json'
 
+/**
+ * What marks a file as a download that has not finished.
+ *
+ * Read as well as written: the sweep tells a prefix from a whole file by this
+ * suffix alone, and only one of the two is ever safe to reclaim early.
+ */
+const PARTIAL_SUFFIX = '.partial'
+
+/** Bytes already on disk, and the hash carried forward over them. */
+interface Resume {
+  hasher: Sha256
+  received: number
+}
+
+/**
+ * A ranged request the browser would not make.
+ *
+ * Distinct from a download that failed so the caller can stop asking for the
+ * rest of the install. The message is never shown: what the user is told is
+ * whatever the plain request that follows has to say.
+ */
+class ResumeRejected extends Error {
+  constructor(cause: unknown) {
+    super('The browser refused a ranged request.', { cause })
+    this.name = 'ResumeRejected'
+  }
+}
+
 export class ModelStore {
   private manifest: ModelManifest | null = null
   private states = new Map<string, ModelInstallState>()
@@ -86,6 +114,15 @@ export class ModelStore {
   private adopted = new Map<string, string>()
   /** Partial files being written to right now. The sweep must not touch these. */
   private inFlightPartials = new Set<string>()
+  /**
+   * Whether this browser will make a ranged request at all.
+   *
+   * Assumed until one is refused, and not reconsidered for the rest of the
+   * session: it is a property of the browser, not of the model that happened to
+   * be first in the queue. Where it turns out to be false every download simply
+   * starts from zero, which is what the app did before resuming existed.
+   */
+  private rangedResume = true
   /**
    * Legacy files the adoption pass could not settle this session.
    *
@@ -591,9 +628,22 @@ export class ModelStore {
 
   // MARK: - Download
 
+  /**
+   * Fetches one model, resuming from a partial where the browser can and
+   * starting over where it cannot.
+   *
+   * The resume is the fragile half, and its failure used to be permanent. Asking
+   * for `bytes=N-` is what makes the request preflighted, and a model URL
+   * redirects to a CDN host that does not answer that preflight everywhere —
+   * WebKit, and so every browser on iOS, is where it reliably does not. Nothing
+   * cleaned up after that: the partial stayed exactly where it was, so the next
+   * attempt sent the same doomed request and the model could never install
+   * again. A download that has failed once is not a download that should keep
+   * failing, so a resume that fails is now taken at its word — the bytes on disk
+   * are dropped and the file is fetched whole, once.
+   */
   private async download(descriptor: ModelDescriptor, baseline: number) {
     const directory = await modelsDirectory()
-    const signal = this.abort?.signal
 
     // The digest is in the *partial's* name as well, and that is not decoration.
     // A partial left over from an older generation used to be indistinguishable
@@ -602,74 +652,126 @@ export class ModelStore {
     // can only fail, and only after every byte of it has been paid for. With the
     // digest in the name there is nothing there to resume against.
     const staging = partialName(digestName(descriptor))
-    const partial = await directory.getFileHandle(staging, { create: true })
     this.inFlightPartials.add(staging)
 
     try {
-      // A partial file only helps if the server will serve the rest of it *and*
-      // we can carry the hash forward. We cannot: SHA-256 state is not
-      // reconstructible from a prefix without re-reading it, so a resume re-hashes
-      // what is already on disk rather than re-downloading it. That trade is
-      // strongly worth it — hashing 200 MB is a couple of seconds, fetching it
-      // again is not.
-      const existing = await partial.getFile()
-      const hasher = new Sha256()
-      let received = 0
-
-      if (existing.size > 0 && existing.size < descriptor.bytes) {
-        const stream = existing.stream()
-        const reader = stream.getReader()
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          hasher.update(value)
-          received += value.length
-        }
-        this.report(descriptor, received, baseline)
-      } else if (existing.size >= descriptor.bytes) {
-        // Longer than expected means a previous run wrote something we cannot
-        // reason about. Start over rather than try to salvage it.
-        received = 0
-      }
-
-      const headers: HeadersInit = received > 0 ? { Range: `bytes=${received}-` } : {}
-      const response = await fetch(descriptor.url, { headers, signal, mode: 'cors' })
-
-      if (received > 0 && response.status !== 206) {
-        // The server ignored the Range request, so the body is the whole file and
-        // the bytes already hashed are meaningless.
-        await this.downloadFresh(descriptor, baseline, partial, response)
+      const partial = await directory.getFileHandle(staging, { create: true })
+      const resume = await this.resumeFrom(partial, descriptor, baseline)
+      if (!resume) {
+        await this.transfer(descriptor, baseline, directory, partial, null)
         return
       }
-      if (!response.ok) {
-        throw new Error(`Download failed (HTTP ${response.status}).`)
+
+      try {
+        await this.transfer(descriptor, baseline, directory, partial, resume)
+      } catch (error) {
+        if (this.abort?.signal.aborted) throw error
+        if (error instanceof ResumeRejected) {
+          // Not this download's bad luck but this browser's answer, and the same
+          // answer is waiting for every model after it. Asking once is a wasted
+          // round trip; asking five times is five of them.
+          this.rangedResume = false
+        }
+        // Whatever went wrong went wrong with bytes on disk in play: a request
+        // the CDN would not serve, an offset the browser's OPFS did not honour,
+        // or a digest that came out wrong because of one of those. None of them
+        // are worth telling apart here when the whole file is one fetch away,
+        // and none of them get better by being retried the same way.
+        await directory.removeEntry(staging).catch(() => {})
+        this.report(descriptor, 0, baseline)
+        await this.transfer(
+          descriptor,
+          baseline,
+          directory,
+          await directory.getFileHandle(staging, { create: true }),
+          null,
+        )
       }
-      if (!response.body) throw new Error('The download returned no data.')
-
-      // `keepExistingData` plus an explicit offset is what makes this a resume
-      // rather than a truncate-and-rewrite.
-      const writable = await partial.createWritable({ keepExistingData: received > 0 })
-      if (received > 0) await writable.seek(received)
-
-      await this.pump(response.body, writable, hasher, descriptor, baseline, received)
-      await this.finish(descriptor, partial, hasher, directory)
     } finally {
       this.inFlightPartials.delete(staging)
     }
   }
 
-  private async downloadFresh(
+  /**
+   * What of a half-finished download can be picked up again, if anything.
+   *
+   * A partial file only helps if the server will serve the rest of it *and* we
+   * can carry the hash forward. We cannot: SHA-256 state is not reconstructible
+   * from a prefix without re-reading it, so a resume re-hashes what is already on
+   * disk rather than re-downloading it. That trade is strongly worth it —
+   * hashing 200 MB is a couple of seconds, fetching it again is not.
+   *
+   * `null` means start from zero: nothing on disk, something longer than the file
+   * it claims to be, or a browser that has already shown this session that it
+   * cannot make a ranged request at all.
+   */
+  private async resumeFrom(
+    partial: FileSystemFileHandle,
     descriptor: ModelDescriptor,
     baseline: number,
+  ): Promise<Resume | null> {
+    if (!this.rangedResume) return null
+
+    const existing = await partial.getFile()
+    // Longer than expected means a previous run wrote something we cannot reason
+    // about. Start over rather than try to salvage it.
+    if (existing.size === 0 || existing.size >= descriptor.bytes) return null
+
+    const hasher = new Sha256()
+    let received = 0
+    const reader = existing.stream().getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      hasher.update(value)
+      received += value.length
+    }
+    this.report(descriptor, received, baseline)
+    return { hasher, received }
+  }
+
+  /** One attempt at the bytes: ranged when `resume` is given, whole when it is not. */
+  private async transfer(
+    descriptor: ModelDescriptor,
+    baseline: number,
+    directory: FileSystemDirectoryHandle,
     partial: FileSystemFileHandle,
-    response: Response,
+    resume: Resume | null,
   ) {
+    const signal = this.abort?.signal
+    const headers: HeadersInit = resume ? { Range: `bytes=${resume.received}-` } : {}
+
+    let response: Response
+    try {
+      response = await fetch(descriptor.url, { headers, signal, mode: 'cors' })
+    } catch (error) {
+      // A ranged request that never came back at all is the one failure worth
+      // telling apart. `Range` is the header that forces the preflight, so this
+      // is the browser declining to resume rather than the network being down —
+      // and the plain request that follows will usually succeed where it did not.
+      if (resume && !signal?.aborted) throw new ResumeRejected(error)
+      throw error
+    }
+
     if (!response.ok) throw new Error(`Download failed (HTTP ${response.status}).`)
     if (!response.body) throw new Error('The download returned no data.')
-    const hasher = new Sha256()
-    const writable = await partial.createWritable({ keepExistingData: false })
-    await this.pump(response.body, writable, hasher, descriptor, baseline, 0)
-    await this.finish(descriptor, partial, hasher, await modelsDirectory())
+
+    // A 200 to a ranged request is a server that ignored the Range: the body is
+    // the whole file and the bytes already hashed are meaningless. The response
+    // is still the file, so it is written rather than fetched a second time.
+    const from = resume && response.status === 206 ? resume : null
+    if (resume && !from) this.report(descriptor, 0, baseline)
+
+    const hasher = from?.hasher ?? new Sha256()
+    const received = from?.received ?? 0
+
+    // `keepExistingData` plus an explicit offset is what makes this a resume
+    // rather than a truncate-and-rewrite.
+    const writable = await partial.createWritable({ keepExistingData: received > 0 })
+    if (received > 0) await writable.seek(received)
+
+    await this.pump(response.body, writable, hasher, descriptor, baseline, received)
+    await this.finish(descriptor, partial, hasher, directory)
   }
 
   private async pump(
@@ -788,8 +890,6 @@ export class ModelStore {
    * be the policy, and of the two only one of them ever costs a re-download.
    */
   private async sweep(): Promise<void> {
-    if (!this.isReady) return
-
     const directory = await modelsDirectory()
     const keep = new Set<string>([ADOPTION_RECORD])
     for (const descriptor of this.descriptors()) {
@@ -800,9 +900,19 @@ export class ModelStore {
       keep.add(partialName(digestName(descriptor)))
     }
 
+    // Rule (b) is a rule about *complete* files. An old generation's weights are
+    // the user's only working copy until the new ones land, and reclaiming them
+    // early costs them the app. A `.partial` is never anybody's working copy — it
+    // is a prefix of a name nothing will ask for again — so those go whether or
+    // not the library is ready. That matters because a first install that failed
+    // is exactly the state that leaves them behind, and it is also the state in
+    // which nothing else will ever run this sweep to completion.
+    const partialsOnly = !this.isReady
+
     let removed = false
     for (const name of await entryNames(directory)) {
       if (keep.has(name) || this.inFlightPartials.has(name) || this.preserved.has(name)) continue
+      if (partialsOnly && !name.endsWith(PARTIAL_SUFFIX)) continue
       await directory.removeEntry(name).catch(() => {})
       removed = true
     }
@@ -846,7 +956,7 @@ function digestName(descriptor: ModelDescriptor) {
 }
 
 function partialName(name: string) {
-  return `${name}.partial`
+  return `${name}${PARTIAL_SUFFIX}`
 }
 
 /** What a model was called before the name carried its digest. */
