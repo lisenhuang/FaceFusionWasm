@@ -29,6 +29,7 @@ import {
   type ComputePolicy,
   type EngineFootprint,
   type ModelID,
+  ModelRole,
   REQUIRED_MODELS,
   type SwapOptions,
   EngineError,
@@ -372,14 +373,43 @@ async function prepare(compute: ComputePolicy, footprint: EngineFootprint) {
   const wanted: Set<ModelID> =
     footprint === 'minimal' ? new Set(REQUIRED_MODELS) : installed
 
-  loader = await makeBestLoader(compute, footprint)
+  const use = (id: ModelID) => installed.has(id) && wanted.has(id)
+
+  // The order the pipeline loads in, so "2 of 3" counts the same models it does.
+  const plan = [
+    ...REQUIRED_MODELS,
+    ModelRole.faceLandmarker,
+    ModelRole.faceEnhancer,
+  ].filter(use)
+
+  let loaded = 0
+  const report = (stage: 'reading' | 'building', model: ModelID) =>
+    emit({ kind: 'engine', progress: { stage, model, loaded, total: plan.length } })
+
+  const base = await makeBestLoader(compute, footprint)
+  // Wrapped rather than reported from inside the pipeline, so `src/engine/` stays
+  // free of anything that knows there is a page listening.
+  loader = {
+    get provider() {
+      return base.provider
+    },
+    usingGPU: base.usingGPU,
+    async load(id, modelBytes, options) {
+      report('building', id)
+      const model = await base.load(id, modelBytes, options)
+      loaded += 1
+      return model
+    },
+  }
 
   // Read one model at a time, straight from OPFS into the session builder. The
   // buffer goes out of scope as soon as the session exists, so the peak is one
   // model plus the runtime's copy of it rather than all five at once.
-  return pipeline.prepare(loader, async (id) =>
-    installed.has(id) && wanted.has(id) ? await store.read(id) : null,
-  )
+  return pipeline.prepare(loader, async (id) => {
+    if (!use(id)) return null
+    report('reading', id)
+    return store.read(id)
+  })
 }
 
 /**
