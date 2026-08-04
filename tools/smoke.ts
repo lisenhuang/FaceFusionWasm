@@ -11,13 +11,13 @@
  *
  *     pnpm smoke [--url http://localhost:3000] [--models <dir>] [--headed]
  *
- * With `--models`, the manifest is rewritten to point at a local file server so the
+ * With `--models`, the model downloads are redirected to a local file server so the
  * install runs for real — streaming, hashing, verifying — without a 900 MB download,
  * and the run continues through engine start-up and a real swap.
  */
 
 import { existsSync } from 'node:fs'
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -45,6 +45,7 @@ function argument(flag: string): string | undefined {
   return index >= 0 ? process.argv[index + 1] : undefined
 }
 
+/** What the macOS app calls these on disk, which is what `--models` points at. */
 const MODEL_FILES = [
   'yoloface_8n.onnx',
   'arcface_w600k_r50.onnx',
@@ -52,6 +53,32 @@ const MODEL_FILES = [
   '2dfan4.onnx',
   'gfpgan_1.4.onnx',
 ]
+
+interface ManifestModel {
+  id: string
+  url: string
+  sha256: string
+  bytes: number
+  required: boolean
+}
+
+/**
+ * The same manifest the app is built against.
+ *
+ * The bundle imports `public/models.json` at build time rather than fetching it,
+ * so there is no request to intercept any more — reading the file is how this
+ * harness learns which URLs to redirect and which names to expect in OPFS.
+ */
+async function readManifest(): Promise<ManifestModel[]> {
+  const path = join(process.cwd(), 'public', 'models.json')
+  const parsed = JSON.parse(await readFile(path, 'utf8')) as { models: ManifestModel[] }
+  return parsed.models
+}
+
+/** How the store names an installed model: id, first 16 digest characters, `.onnx`. */
+function storedName(model: ManifestModel): string {
+  return `${model.id}-${model.sha256.toLowerCase().slice(0, 16)}.onnx`
+}
 
 async function main() {
   const url = argument('--url') ?? 'http://localhost:3000'
@@ -63,6 +90,7 @@ async function main() {
     join(homedir(), 'Library/Group Containers/HPL74FCW8E.com.lisenhuang.FaceFusionMac/SelfTest')
   const outDir = join(process.cwd(), '.verify-out')
   await mkdir(outDir, { recursive: true })
+  const models = await readManifest()
 
   // A persistent profile keeps OPFS between runs, so the 903 MB install happens
   // once rather than on every iteration. `--fresh` throws it away.
@@ -107,7 +135,10 @@ async function main() {
   // straight into the studio, so the first-run screen is checked only when it
   // is the screen that is actually showing.
   const needsInstall = await page
-    .waitForSelector('text=Set up FaceFusion', { timeout: 30_000 })
+    // The heading the onboarding screen actually renders — the product is
+    // Morphiqo, and waiting on the old name meant this harness quietly decided
+    // the models were already installed and skipped the install path entirely.
+    .waitForSelector('text=Set up Morphiqo', { timeout: 30_000 })
     .then(() => true)
     .catch(() => false)
 
@@ -187,36 +218,35 @@ async function main() {
   }
 
   if (needsInstall) {
-    // Rather than write the weights into OPFS by hand, point the manifest at a
-    // local file server and let the app install them the way a user would. The
-    // files are the genuine release assets, so the digests in the manifest still
-    // apply — which means this exercises the streaming download, the resumable
-    // writer and the checksum gate rather than stepping around them.
+    // Rather than write the weights into OPFS by hand, serve them locally and let
+    // the app install them the way a user would. The files are the genuine
+    // release assets, so the digests in the manifest still apply — which means
+    // this exercises the streaming download, the resumable writer and the
+    // checksum gate rather than stepping around them.
     console.log('\nInstalling models through the app')
     const origin = await serveModels(modelsDir)
     console.log(`  ${DIM}serving ${modelsDir} at ${origin}${RESET}`)
 
-    await page.route('**/models.json', async (route) => {
-      const response = await route.fetch()
-      const manifest = JSON.parse(await response.text())
-      for (const model of manifest.models) {
-        model.url = `${origin}/${model.id}.onnx`
-      }
+    // The manifest is compiled into the bundle, so there is no longer a request
+    // that could be rewritten to point somewhere else. Each remote weight URL is
+    // answered with a redirect instead: only the redirect crosses Playwright's
+    // interception, and the ~900 MB that follows is fetched straight from the
+    // local server, which is what keeps a local transfer fast.
+    const redirects = new Map(models.map((model) => [model.url, `${origin}/${model.id}.onnx`]))
+    // Held in a variable because `unroute` matches on the identity of this
+    // function, not on what it does.
+    const isRemoteWeight = (url: URL) => redirects.has(url.toString())
+    await page.route(isRemoteWeight, async (route) => {
       await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(manifest),
+        status: 302,
+        headers: {
+          location: redirects.get(route.request().url()) ?? '',
+          // A redirect on a CORS request is itself CORS-checked, so this one has
+          // to say who may follow it.
+          'access-control-allow-origin': '*',
+        },
       })
     })
-
-    await page.reload({ waitUntil: 'networkidle' })
-    await page.waitForSelector('text=Set up FaceFusion', { timeout: 30_000 })
-
-    // The rewritten manifest is now in the worker's hands, so the interception
-    // has done its job. Removing it matters: while any route is registered,
-    // Playwright pauses and resumes every request over CDP, and paying that on
-    // ~900 MB of model traffic turns a fast local transfer into a crawl.
-    await page.unroute('**/models.json')
 
     await page.getByRole('button', { name: /Download/ }).click()
 
@@ -234,12 +264,18 @@ async function main() {
       for await (const name of directory.keys()) entries.push(name as string)
       return entries.sort()
     })
+    // Digest-named, and nothing else: a leftover `.partial` or a file from an
+    // older generation still sitting here would mean the sweep did not run.
+    const expected = models.map(storedName).sort()
     check(
-      'OPFS holds exactly the installed models',
-      stored.length === MODEL_FILES.length &&
-        MODEL_FILES.every((name) => stored.includes(name)),
+      'OPFS holds exactly the installed models, digest-named',
+      stored.length === expected.length && expected.every((name) => stored.includes(name)),
       stored.join(', '),
     )
+
+    // The route only ever answered the redirect; leaving it registered would
+    // make Playwright pause and resume every later request for nothing.
+    await page.unroute(isRemoteWeight)
   }
 
   // ------------------------------------------------------------------ studio
