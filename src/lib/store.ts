@@ -16,6 +16,7 @@ import { create } from 'zustand'
 import {
   type AnalysisOptions,
   type DetectedFace,
+  type EngineFootprint,
   type EnginePreparation,
   type FaceIdentity,
   type FaceSelection,
@@ -57,6 +58,62 @@ const PREVIEW_DIMENSION = 1920
  */
 const wasRefused = (error: unknown) =>
   error instanceof EngineRequestError && error.code === REMOVAL_REFUSED
+
+/**
+ * Where the last preparation attempt is written down.
+ *
+ * Loading the library is the one thing this app does that can take the page down
+ * with it rather than throw. Hundreds of megabytes of weights land in the
+ * runtime's heap over a few seconds, and a browser that will not give up that
+ * much memory kills the tab instead of failing a call — there is no rejected
+ * promise, no `error` event, nothing to catch, and on iOS the whole studio is
+ * replaced by the browser's own "Can't open this page". What the user does next
+ * is open it again, which does exactly the same thing.
+ *
+ * So the attempt is recorded before it starts and cleared when it comes back,
+ * whether it succeeded or threw — a thrown error means the page is alive to
+ * report it, which is not this. A marker still sitting there at the next launch
+ * is a launch that never returned, and the one after it asks for less. A second
+ * failure stops asking.
+ *
+ * `localStorage` for two reasons: it is synchronous, so the write is on disk
+ * before the work that might kill the process begins, and it outlives the
+ * renderer that wrote it.
+ */
+const ATTEMPT_KEY = 'morphiqo.engine-attempt'
+
+function lastAttempt(): EngineFootprint | null {
+  try {
+    const value = localStorage.getItem(ATTEMPT_KEY)
+    return value === 'full' || value === 'minimal' ? value : null
+  } catch {
+    // Storage disabled or partitioned away. Losing the guard means losing the
+    // recovery, not the app: without it every launch is simply a full one.
+    return null
+  }
+}
+
+function markAttempt(footprint: EngineFootprint | null) {
+  try {
+    if (footprint) localStorage.setItem(ATTEMPT_KEY, footprint)
+    else localStorage.removeItem(ATTEMPT_KEY)
+  } catch {
+    // As above.
+  }
+}
+
+/**
+ * What the page says when neither the full library nor the smallest one it can
+ * run on survived being loaded.
+ *
+ * Deliberately about what to do rather than what went wrong: the quality extras
+ * are 438 MB of the 903 MB library and removing them is the one lever the user
+ * has left.
+ */
+const OUT_OF_MEMORY_MESSAGE =
+  'This device ran out of memory loading the models — twice, the second time with ' +
+  'only the essentials. Removing the quality extras in Storage frees the most, but ' +
+  'this browser may not have the memory to run the studio at all.'
 
 export type FaceMode = 'everyFace' | 'oneFace' | 'chosen'
 
@@ -194,7 +251,7 @@ export const useStore = create<Store>()((set, get) => {
     return {
       selection: state.faceSelection,
       identityStrength: state.identityStrength,
-      enhanceFace: state.enhanceFace && isInstalled(state, 'gfpgan_1.4'),
+      enhanceFace: state.enhanceFace && isUsable(state, 'gfpgan_1.4'),
       enhancementBlend: 0.8,
       maskBlur: state.maskBlur,
       detectorScore: 0.5,
@@ -382,6 +439,11 @@ export const useStore = create<Store>()((set, get) => {
    * removing and re-adding the photo recovers it.
    */
   const restartEngine = async () => {
+    // The library just changed, so what preparation is about to attempt is not
+    // what failed last time. Whatever it was told to give up, it gets back — and
+    // this is the way out of a refusal: remove the extras, and the engine tries
+    // again with the set that is actually left.
+    markAttempt(null)
     set({ engine: { kind: 'idle' }, sourceFace: null, sourceFaceCount: 0 })
     invalidatePreviewResult()
     await get().startEngine()
@@ -423,6 +485,8 @@ export const useStore = create<Store>()((set, get) => {
       const manifest = get().manifest
       set({ library, modelsReady: requiredInstalled(manifest, library) })
       if (requiredInstalled(manifest, library)) {
+        // As in `restartEngine`: a smaller library earns a fresh attempt at it.
+        markAttempt(null)
         set({ engine: { kind: 'idle' } })
         await get().startEngine()
       } else {
@@ -594,9 +658,20 @@ export const useStore = create<Store>()((set, get) => {
 
     async startEngine() {
       if (get().engine.kind === 'preparing' || get().engine.kind === 'ready') return
+
+      // Whatever the previous launch was doing when it disappeared, it was this.
+      const previous = lastAttempt()
+      if (previous === 'minimal') {
+        set({ engine: { kind: 'failed', message: OUT_OF_MEMORY_MESSAGE } })
+        return
+      }
+      const footprint: EngineFootprint = previous === 'full' ? 'minimal' : 'full'
+
       set({ engine: { kind: 'preparing' } })
+      markAttempt(footprint)
       try {
-        const preparation = await client.send({ type: 'prepare', compute: 'auto' })
+        const preparation = await client.send({ type: 'prepare', compute: 'auto', footprint })
+        markAttempt(null)
         set({ engine: { kind: 'ready', preparation }, statusMessage: null })
         // A source chosen before the engine was up still needs encoding, and a
         // fresh engine holds no reference identities — it dropped them along
@@ -605,6 +680,10 @@ export const useStore = create<Store>()((set, get) => {
         if (get().faceSelection.kind === 'reference') await applyCheckedFaces()
         else await detectPreviewFaces()
       } catch (error) {
+        // A rejection is not a crash: the page is still here to report it, so the
+        // next launch starts from a clean slate rather than inheriting a downgrade
+        // for something that had nothing to do with memory.
+        markAttempt(null)
         const message = error instanceof Error ? error.message : String(error)
         set({ engine: { kind: 'failed', message } })
       }
@@ -1142,6 +1221,24 @@ export function selectedFaceIndices(state: SelectionInput): Set<number> {
 
 export function isInstalled(state: Pick<Store, 'library'>, id: ModelID): boolean {
   return state.library?.states[id]?.kind === 'installed'
+}
+
+/**
+ * Whether the engine can actually use a model, as opposed to owning the file.
+ *
+ * The two came apart when preparation grew a reduced footprint: after a launch
+ * that ran out of memory, the optional models stay on disk and are deliberately
+ * not loaded. A control gated on the library alone would sit there enabled over
+ * a pipeline that has no such session — which is the enhancer toggle claiming to
+ * enhance and quietly doing nothing.
+ *
+ * Before the engine is ready there is nothing better than the library to go on,
+ * and saying "installed" there is right: it is what the next preparation will
+ * try to load.
+ */
+export function isUsable(state: Pick<Store, 'library' | 'engine'>, id: ModelID): boolean {
+  if (state.engine.kind === 'ready') return state.engine.preparation.loadedModels.includes(id)
+  return isInstalled(state, id)
 }
 
 /**

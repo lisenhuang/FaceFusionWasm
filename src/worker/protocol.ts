@@ -21,6 +21,7 @@ import type {
   AnalysisOptions,
   ComputePolicy,
   DetectedFace,
+  EngineFootprint,
   EnginePreparation,
   FaceIdentity,
   ModelID,
@@ -157,7 +158,7 @@ export type EngineRequest =
    */
   | { type: 'removeAllModels' }
   | { type: 'refreshLibrary' }
-  | { type: 'prepare'; compute: ComputePolicy }
+  | { type: 'prepare'; compute: ComputePolicy; footprint: EngineFootprint }
   | { type: 'analyzeSource'; image: TransferableImage; refineLandmarks: boolean }
   | { type: 'clearSource' }
   | { type: 'detectFaces'; image: TransferableImage; detectorScore: number }

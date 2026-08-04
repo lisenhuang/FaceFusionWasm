@@ -15,7 +15,7 @@ import {
   type FaceSelection,
 } from '@/engine/types'
 import { duration } from '@/lib/format'
-import { faceMode, isInstalled, useStore, type FaceMode } from '@/lib/store'
+import { faceMode, isInstalled, isUsable, useStore, type FaceMode } from '@/lib/store'
 import { FacePicker } from './FacePicker'
 import { MediaWell } from './MediaWell'
 import { StoragePanel } from './StoragePanel'
@@ -48,6 +48,9 @@ export function SettingsPanel() {
   const enhanceFace = useStore((state) => state.enhanceFace)
   const useHEVC = useStore((state) => state.useHEVC)
   const enhancerInstalled = useStore((state) => isInstalled(state, 'gfpgan_1.4'))
+  // Installed and loaded are not the same thing once preparation has had to run
+  // with a reduced footprint: the file is there, the session is not.
+  const enhancerUsable = useStore((state) => isUsable(state, 'gfpgan_1.4'))
   const engineReady = useStore((state) => state.engine.kind === 'ready')
 
   const chooseSource = useStore((state) => state.chooseSource)
@@ -146,14 +149,16 @@ export function SettingsPanel() {
         />
 
         <Toggle
-          checked={enhanceFace && enhancerInstalled}
-          disabled={!enhancerInstalled}
+          checked={enhanceFace && enhancerUsable}
+          disabled={!enhancerUsable}
           onChange={setEnhanceFace}
           title="Enhance detail"
           hint={
-            enhancerInstalled
+            enhancerUsable
               ? 'Sharper skin and eyes. Slower.'
-              : `Needs the ${MODEL_DISPLAY_NAME['gfpgan_1.4']}, which is not installed. Add it under Storage.`
+              : enhancerInstalled
+                ? `The ${MODEL_DISPLAY_NAME['gfpgan_1.4']} is installed but not loaded: this device did not have the memory for it. Removing it under Storage frees the space.`
+                : `Needs the ${MODEL_DISPLAY_NAME['gfpgan_1.4']}, which is not installed. Add it under Storage.`
           }
         />
 
