@@ -389,17 +389,10 @@ export class ModelStore {
       return
     }
 
+    // A rename on the same disk: no bytes read, no bytes written, no second
+    // 340 MB of space needed to hold a copy while it is made.
     const handle = await directory.getFileHandle(legacy)
-    const movable = handle as FileSystemFileHandle & {
-      move?: (name: string) => Promise<void>
-    }
-    if (typeof movable.move === 'function') {
-      // A rename on the same disk: no bytes read, no bytes written, no second
-      // 340 MB of space needed to hold a copy while it is made.
-      await directory.removeEntry(digestName(descriptor)).catch(() => {})
-      await movable.move(digestName(descriptor))
-      return
-    }
+    if (await renameWithin(directory, handle, digestName(descriptor))) return
 
     // No rename primitive in this browser's OPFS. Copying would mean reading
     // and writing 900 MB to end up with the same bytes under a different name,
@@ -834,18 +827,11 @@ export class ModelStore {
       throw new Error(`The download is ${size} bytes, expected ${descriptor.bytes}.`)
     }
 
-    // `move` is a rename: no bytes read, no bytes written. Where it is missing
-    // the fallback streams the file into place, which for a 340 MB model is a
-    // second full pass over the data — worth avoiding whenever the browser
-    // lets us.
-    const movable = partial as FileSystemFileHandle & {
-      move?: (name: string) => Promise<void>
-    }
-    if (typeof movable.move === 'function') {
-      await directory.removeEntry(target).catch(() => {})
-      await movable.move(target)
-      return
-    }
+    // `move` is a rename: no bytes read, no bytes written. Where the browser
+    // will not do one the fallback streams the file into place, which for a
+    // 340 MB model is a second full pass over the data — worth avoiding
+    // whenever the browser lets us.
+    if (await renameWithin(directory, partial, target)) return
 
     const destination = await directory.getFileHandle(target, { create: true })
     const writable = await destination.createWritable({ keepExistingData: false })
@@ -975,6 +961,40 @@ async function removeNames(directory: FileSystemDirectoryHandle, names: string[]
   for (const name of names) {
     await directory.removeEntry(name).catch(() => {})
     await directory.removeEntry(partialName(name)).catch(() => {})
+  }
+}
+
+/**
+ * Renames a file inside the models directory, or reports that it could not.
+ *
+ * Two arguments, always. `move(name)` is the obvious call and it is the one
+ * WebKit does not have: its OPFS implements `move(directory, name)` only, and
+ * answers the one-argument form with a `TypeError` reading "Not enough
+ * arguments". Detecting the method with `typeof move === 'function'` cannot see
+ * that — the method is there, it just will not be called that way — so the
+ * attempt is the detection, and a refusal is returned rather than thrown.
+ *
+ * What that mistake cost is worth writing down, because nothing about the shape
+ * of the code suggests it: the rename is the *last* step of an install, so on
+ * every browser on iOS each model downloaded in full, verified against its
+ * checksum, and only then failed. The failure looked like a broken download of
+ * the smallest model, because the smallest model is the one that got there first.
+ */
+async function renameWithin(
+  directory: FileSystemDirectoryHandle,
+  handle: FileSystemFileHandle,
+  target: string,
+): Promise<boolean> {
+  const movable = handle as FileSystemFileHandle & {
+    move?: (parent: FileSystemDirectoryHandle, name: string) => Promise<void>
+  }
+  if (typeof movable.move !== 'function') return false
+  try {
+    await directory.removeEntry(target).catch(() => {})
+    await movable.move(directory, target)
+    return true
+  } catch {
+    return false
   }
 }
 
