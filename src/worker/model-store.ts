@@ -78,6 +78,8 @@ export class ModelStore {
   private sessionReceived = 0
   private sessionTotal = 0
   private working = false
+  /** Set while a deletion owns the directory — see `exclusively`. */
+  private removing = false
   private abort: AbortController | null = null
   private readonly onChange: (status: ModelLibraryStatus) => void
   /** Full digest → the name a hash-verified file is kept under, when it is not the digest name. */
@@ -140,6 +142,11 @@ export class ModelStore {
     await this.adoption
     await this.refreshStates()
     await this.sweep()
+    // Asked for here as well as after every install and removal, because the
+    // storage panel shows this number to a returning user who has installed
+    // nothing this session — and a `usageBytes` of null there would claim the
+    // browser refused to answer when nothing had asked it.
+    await this.updateUsage()
     return MANIFEST
   }
 
@@ -225,6 +232,17 @@ export class ModelStore {
 
   isInstalled(id: ModelID): boolean {
     return this.states.get(id)?.kind === 'installed'
+  }
+
+  /**
+   * True while a download or a deletion owns the directory.
+   *
+   * Read by the worker so it can refuse a removal *before* it releases the
+   * sessions. `exclusively` asks the same question, but by then the engine is
+   * already down and the answer is too late to be a refusal.
+   */
+  get isBusy(): boolean {
+    return this.working || this.removing
   }
 
   installedIDs(): ModelID[] {
@@ -415,7 +433,11 @@ export class ModelStore {
   // MARK: - Installing
 
   async install(ids: ModelID[]): Promise<ModelLibraryStatus> {
-    if (this.working) return this.status()
+    // A removal is walking the same directory and is about to publish "missing"
+    // for the files it deletes. Downloading into that would have the two passes
+    // racing over the same names, and the loser writes a state describing a file
+    // the winner has already dealt with.
+    if (this.working || this.removing) return this.status()
 
     const pending = ids
       .map((id) => this.descriptor(id))
@@ -472,17 +494,97 @@ export class ModelStore {
     return this.emit()
   }
 
+  /**
+   * Deletes one model's bytes, in every name they could be under.
+   *
+   * All of them, not just the one `storedName` points at. A partial from an
+   * interrupted download, the legacy file belonging to a user whose weights the
+   * adoption pass could not settle, and the digest name — which is *not*
+   * `storedName` once a file has been adopted in place, and which nothing else
+   * will ever come back for, because the sweep gives up the moment the library
+   * is incomplete. A "remove" that leaves 340 MB on disk under a name this pass
+   * did not think of and reports it freed is worse than no button at all.
+   */
   async remove(id: ModelID): Promise<ModelLibraryStatus> {
-    const directory = await modelsDirectory()
-    const descriptor = this.descriptor(id)
-    if (descriptor) {
-      await directory.removeEntry(this.storedName(descriptor)).catch(() => {})
-      await directory.removeEntry(partialName(digestName(descriptor))).catch(() => {})
-      if (this.adopted.delete(descriptor.sha256.toLowerCase())) {
-        await this.saveAdoptionRecord(directory)
+    return this.exclusively(async (directory) => {
+      const descriptor = this.descriptor(id)
+      if (descriptor) {
+        await removeNames(directory, [this.storedName(descriptor), digestName(descriptor)])
+        if (this.adopted.delete(descriptor.sha256.toLowerCase())) {
+          await this.saveAdoptionRecord(directory)
+        }
       }
+      const legacy = legacyName(id)
+      await removeNames(directory, [legacy])
+      // Nothing is being kept for a later adoption attempt now that the user has
+      // asked for it gone, and leaving the name here would have the sweep spare
+      // a file that no longer exists.
+      this.preserved.delete(legacy)
+      this.states.set(id, { kind: 'missing' })
+    })
+  }
+
+  /**
+   * Empties the directory: every model, and everything else that accumulated
+   * beside them.
+   *
+   * Named first, listed second, and that order is the point. Listing needs
+   * `keys()`, which this file already treats as optional because not every OPFS
+   * implementation has it — for the sweep its absence only means a directory
+   * that grows, but here it would mean deleting *nothing at all* while
+   * publishing the whole library as missing. The user would then be sent through
+   * a 903 MB download for bytes that never left the disk, which is precisely the
+   * lie this screen exists to avoid telling. The names the manifest implies need
+   * no listing to be found.
+   *
+   * The listing is still worth walking afterwards, because it is the only thing
+   * that finds what the manifest cannot name: weights from a superseded release,
+   * a partial for an id that has since been dropped, the adoption record. Those
+   * are exactly the bytes a user asking to reclaim *everything* means.
+   */
+  async removeAll(): Promise<ModelLibraryStatus> {
+    return this.exclusively(async (directory) => {
+      for (const descriptor of this.descriptors()) {
+        await removeNames(directory, [
+          this.storedName(descriptor),
+          digestName(descriptor),
+          legacyName(descriptor.id),
+        ])
+      }
+      await directory.removeEntry(ADOPTION_RECORD).catch(() => {})
+
+      for (const name of await entryNames(directory)) {
+        await directory.removeEntry(name).catch(() => {})
+      }
+
+      this.adopted.clear()
+      this.preserved.clear()
+      for (const descriptor of this.descriptors()) {
+        this.states.set(descriptor.id, { kind: 'missing' })
+      }
+    })
+  }
+
+  /**
+   * Runs a deletion with the directory to itself.
+   *
+   * `install` checks the same flag, so the two can never be half way through
+   * each other. Refusing rather than queueing is deliberate: a download that
+   * finishes after the user asked for the file to be deleted has spent their
+   * bandwidth on bytes they said they did not want.
+   */
+  private async exclusively(
+    task: (directory: FileSystemDirectoryHandle) => Promise<void>,
+  ): Promise<ModelLibraryStatus> {
+    if (this.working) {
+      throw new Error('A download is in progress. Cancel it before removing models.')
     }
-    this.states.set(id, { kind: 'missing' })
+    this.removing = true
+    try {
+      await task(await modelsDirectory())
+    } finally {
+      this.removing = false
+    }
     await this.updateUsage()
     return this.emit()
   }
@@ -750,6 +852,20 @@ function partialName(name: string) {
 /** What a model was called before the name carried its digest. */
 function legacyName(id: string) {
   return `${id}.onnx`
+}
+
+/**
+ * Deletes each name and the partial beside it, and never throws.
+ *
+ * A name that is not there is the normal case — most of these are alternatives
+ * to one another — so "no such file" is not a failure, and one name failing must
+ * not leave the rest of a model's bytes on disk.
+ */
+async function removeNames(directory: FileSystemDirectoryHandle, names: string[]) {
+  for (const name of names) {
+    await directory.removeEntry(name).catch(() => {})
+    await directory.removeEntry(partialName(name)).catch(() => {})
+  }
 }
 
 /** The size of a file in the directory, or `null` when there is no such file. */

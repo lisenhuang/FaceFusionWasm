@@ -57,6 +57,14 @@ export default function Page() {
   // progress bar for a download the user was told was 903 MB and has only seen
   // half of.
   const installing = useStore((state) => state.library?.isWorking ?? false)
+  /**
+   * Whether the download in progress started from a library that was already
+   * complete — a model added back from the studio's storage panel rather than a
+   * first run. That one has its own progress bar where it was started, and
+   * sending the user to the setup screen for it would take the video they are
+   * working on off the screen with it.
+   */
+  const topUp = useStore((state) => state.topUpInstall)
   const boot = useStore((state) => state.boot)
 
   useEffect(() => {
@@ -68,7 +76,7 @@ export default function Page() {
   if (missing.length > 0) return <Unsupported missing={missing} />
   if (!booted) return <Splash />
 
-  return modelsReady && !installing ? <Studio /> : <Onboarding />
+  return modelsReady && (!installing || topUp) ? <Studio /> : <Onboarding />
 }
 
 function Splash() {

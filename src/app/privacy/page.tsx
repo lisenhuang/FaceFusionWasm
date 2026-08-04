@@ -141,9 +141,10 @@ export default function PrivacyPage() {
         </p>
         <p>
           You can remove all of it at any time. Deleting the app removes its container on
-          iOS and macOS. In the web app, clearing site data for this site removes the
-          models and settings. Neither leaves anything behind on a server, because there is
-          no server.
+          iOS and macOS. In the web app, the Storage section in Settings removes the models
+          — any one of them, or all of them — and clearing this site&rsquo;s data in the
+          browser removes everything, settings included. Nothing is left behind on a
+          server, because there is no server.
         </p>
       </Section>
 

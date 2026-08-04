@@ -18,6 +18,7 @@ import { duration } from '@/lib/format'
 import { faceMode, isInstalled, useStore, type FaceMode } from '@/lib/store'
 import { FacePicker } from './FacePicker'
 import { MediaWell } from './MediaWell'
+import { StoragePanel } from './StoragePanel'
 import {
   IconBolt,
   IconFilm,
@@ -152,7 +153,7 @@ export function SettingsPanel() {
           hint={
             enhancerInstalled
               ? 'Sharper skin and eyes. Slower.'
-              : `Needs the ${MODEL_DISPLAY_NAME['gfpgan_1.4']} model.`
+              : `Needs the ${MODEL_DISPLAY_NAME['gfpgan_1.4']}, which is not installed. Add it under Storage.`
           }
         />
 
@@ -166,6 +167,10 @@ export function SettingsPanel() {
           />
         ) : null}
       </div>
+
+      <hr className="border-ink-800" />
+
+      <StoragePanel />
 
       <EngineBadge />
     </div>
@@ -221,6 +226,19 @@ function FramePreview({ frame }: { frame: ImageData }) {
 
 function EngineBadge() {
   const engine = useStore((state) => state.engine)
+  // A deletion parks the engine in `preparing` so nothing dispatches work at a
+  // pipeline that is being torn down. That is true, but "Starting engine…" is
+  // not what is happening, and this is the one place that says what is.
+  const libraryBusy = useStore((state) => state.libraryBusy)
+
+  if (libraryBusy) {
+    return (
+      <div className="flex items-center gap-2 text-[11.5px] text-ink-400">
+        <Spinner className="h-3.5 w-3.5" />
+        <span>Reclaiming space…</span>
+      </div>
+    )
+  }
 
   return (
     <div className="flex items-center gap-2 text-[11.5px] text-ink-400">

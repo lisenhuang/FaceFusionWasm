@@ -25,7 +25,13 @@ import {
   identityDistance,
   nearestIdentityDistance,
 } from '@/engine/types'
-import { EngineClient, fromTransferableImage, toTransferableImage } from './engine-client'
+import {
+  EngineClient,
+  EngineRequestError,
+  fromTransferableImage,
+  toTransferableImage,
+} from './engine-client'
+import { REMOVAL_REFUSED } from '@/worker/protocol'
 import type {
   ExportProgress,
   ModelLibraryStatus,
@@ -43,6 +49,14 @@ import type {
  * resolution, so this bounds the feedback loop and nothing else.
  */
 const PREVIEW_DIMENSION = 1920
+
+/**
+ * Whether a removal declined to start, as opposed to starting and failing.
+ *
+ * The difference decides whether the engine the page was holding is still real.
+ */
+const wasRefused = (error: unknown) =>
+  error instanceof EngineRequestError && error.code === REMOVAL_REFUSED
 
 export type FaceMode = 'everyFace' | 'oneFace' | 'chosen'
 
@@ -69,6 +83,16 @@ interface State {
   manifest: ModelManifest | null
   library: ModelLibraryStatus | null
   modelsReady: boolean
+  /** A deletion is in flight. Separate from `library.isWorking`, which is a download. */
+  libraryBusy: boolean
+  /**
+   * The install now running began with the library already complete — so it is a
+   * model being added back, not a first run. Recorded when the download starts
+   * rather than derived while it runs, because `modelsReady` flips as soon as
+   * the required models land and the screen must not change under a download
+   * that began before that.
+   */
+  topUpInstall: boolean
 
   // Engine
   engine: EngineState
@@ -116,6 +140,8 @@ interface Actions {
   installModels(ids: ModelID[]): Promise<void>
   cancelInstall(): void
   removeModel(id: ModelID): Promise<void>
+  removeModels(ids: ModelID[]): Promise<void>
+  removeAllModels(): Promise<void>
   startEngine(): Promise<void>
 
   chooseSource(file: File): Promise<void>
@@ -344,6 +370,93 @@ export const useStore = create<Store>()((set, get) => {
   /** Kept outside the store: it is a full-size bitmap, and nothing renders it. */
   let sourcePixels: ImageData | null = null
 
+  /**
+   * Rebuilds the engine so its sessions match what is actually on disk.
+   *
+   * Clearing `sourceFace` first is the whole point, and the macOS app learned it
+   * the hard way: new sessions hold no projected source identity, and
+   * `startEngine` only re-encodes the portrait when there is no face — so left
+   * set, the engine comes back with no source while the sidebar still says "Face
+   * ready" and Export is still enabled. The first frame of the next render then
+   * fails with "no face was found in the source image", and nothing short of
+   * removing and re-adding the photo recovers it.
+   */
+  const restartEngine = async () => {
+    set({ engine: { kind: 'idle' }, sourceFace: null, sourceFaceCount: 0 })
+    invalidatePreviewResult()
+    await get().startEngine()
+  }
+
+  /**
+   * The shared shape of every deletion: stop using the engine, delete, then put
+   * the engine back in whatever state the remaining files justify.
+   *
+   * The worker releases its sessions before it deletes a byte, so from the
+   * moment this is sent there is no engine — and the page has to stop asking for
+   * work first, or a preview swap dispatched in the meantime meets a pipeline
+   * that has been torn down. `preparing` is what does that: every path into the
+   * worker's pipeline is behind `engineReady()`, and a cleared source face
+   * closes the export.
+   *
+   * A *refusal* is thrown before the worker releases anything, so the engine it
+   * holds is still exactly the one this state described and restoring it costs
+   * nothing. Any other failure arrives with the sessions already gone, and there
+   * the same restore would be a lie: the badge would read "ready", Export would
+   * stay enabled, and every frame would fail against a pipeline that is not
+   * there. Only the worker knows which of the two happened, so it says so.
+   */
+  const deleteModels = async (send: () => Promise<ModelLibraryStatus>) => {
+    if (get().libraryBusy || get().library?.isWorking) return
+    const previousEngine = get().engine
+    const hadSourceFace = Boolean(get().sourceFace)
+    set({
+      libraryBusy: true,
+      engine: { kind: 'preparing' },
+      sourceFace: null,
+      sourceFaceCount: 0,
+      statusMessage: null,
+    })
+    invalidatePreviewResult()
+
+    try {
+      const library = await send()
+      const manifest = get().manifest
+      set({ library, modelsReady: requiredInstalled(manifest, library) })
+      if (requiredInstalled(manifest, library)) {
+        set({ engine: { kind: 'idle' } })
+        await get().startEngine()
+      } else {
+        // Nothing to rebuild: swapping is off until the missing weights come
+        // back, and saying "idle" is the honest version of that. `modelsReady`
+        // has already sent the page to the download screen.
+        set({ engine: { kind: 'idle' } })
+      }
+    } catch (error) {
+      fail(error)
+      if (wasRefused(error)) {
+        set({ engine: previousEngine })
+        if (hadSourceFace) await analyzeSource()
+      } else {
+        // The sessions went before this failed, so what is left has to be read
+        // off the disk and rebuilt rather than assumed. Whatever the deletion
+        // managed before it stopped, this leaves the library saying what is
+        // actually there and the engine matching it.
+        set({ engine: { kind: 'idle' } })
+        try {
+          const library = await client.send({ type: 'refreshLibrary' })
+          const manifest = get().manifest
+          set({ library, modelsReady: requiredInstalled(manifest, library) })
+          if (requiredInstalled(manifest, library)) await get().startEngine()
+        } catch {
+          // Nothing further to try from the page; the message above is what the
+          // user has to go on, and `idle` is the honest engine state for it.
+        }
+      }
+    } finally {
+      set({ libraryBusy: false })
+    }
+  }
+
   // ------------------------------------------------------------- events
 
   client.subscribe((event) => {
@@ -371,6 +484,8 @@ export const useStore = create<Store>()((set, get) => {
     manifest: null,
     library: null,
     modelsReady: false,
+    libraryBusy: false,
+    topUpInstall: false,
     engine: { kind: 'idle' },
 
     sourceName: null,
@@ -432,12 +547,20 @@ export const useStore = create<Store>()((set, get) => {
     },
 
     async installModels(ids) {
+      if (get().libraryBusy) return
+      set({ topUpInstall: requiredInstalled(get().manifest, get().library) })
       try {
         const library = await client.send({ type: 'installModels', ids })
         const manifest = get().manifest
-        set({ library, modelsReady: requiredInstalled(manifest, library) })
-        if (requiredInstalled(manifest, library)) await get().startEngine()
+        set({ library, modelsReady: requiredInstalled(manifest, library), topUpInstall: false })
+        // Restarted rather than started, because this is no longer only a
+        // first-run path. Re-downloading a model the user removed while the
+        // studio is open finds the engine already `ready`, and `startEngine`
+        // would return without ever building a session for it — the enhancer
+        // toggle would come back enabled over a pipeline that has no enhancer.
+        if (requiredInstalled(manifest, library)) await restartEngine()
       } catch (error) {
+        set({ topUpInstall: false })
         fail(error)
       }
     },
@@ -447,8 +570,26 @@ export const useStore = create<Store>()((set, get) => {
     },
 
     async removeModel(id) {
-      const library = await client.send({ type: 'removeModel', id })
-      set({ library, modelsReady: requiredInstalled(get().manifest, library) })
+      await get().removeModels([id])
+    },
+
+    /**
+     * One deletion for the whole set, so removing the two quality extras costs a
+     * single teardown and a single reload rather than one of each per model.
+     */
+    async removeModels(ids) {
+      await deleteModels(async () => {
+        let library = get().library
+        for (const id of ids) {
+          library = await client.send({ type: 'removeModel', id })
+        }
+        // Only reachable with an empty list, which is not a deletion at all.
+        return library ?? (await client.send({ type: 'refreshLibrary' }))
+      })
+    },
+
+    async removeAllModels() {
+      await deleteModels(() => client.send({ type: 'removeAllModels' }))
     },
 
     async startEngine() {
@@ -1001,6 +1142,23 @@ export function selectedFaceIndices(state: SelectionInput): Set<number> {
 
 export function isInstalled(state: Pick<Store, 'library'>, id: ModelID): boolean {
   return state.library?.states[id]?.kind === 'installed'
+}
+
+/**
+ * What the installed models occupy, from the manifest's own byte counts.
+ *
+ * Exact rather than approximate: a model only reads as installed once the file
+ * on disk is that many bytes long, so this is the size of the files themselves —
+ * not an estimate, and not the same quantity as the browser's origin-wide
+ * `usageBytes`, which counts everything the site stores and rounds as it likes.
+ */
+export function installedBytes(state: Pick<Store, 'manifest' | 'library'>): number {
+  if (!state.manifest) return 0
+  return state.manifest.models.reduce(
+    (total, model) =>
+      state.library?.states[model.id]?.kind === 'installed' ? total + model.bytes : total,
+    0,
+  )
 }
 
 export function canRender(state: Store): boolean {

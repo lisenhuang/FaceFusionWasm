@@ -141,9 +141,15 @@ export default function SupportPage() {
         <Section title="Removing the models and your data">
           <p>
             Nothing you process leaves your device, so there is no account to close and
-            nothing to request from a server. To reclaim the space: delete the app on iOS or
-            macOS, or clear this site&rsquo;s data in the browser for the web version. That
-            removes the models and your settings completely.
+            nothing to request from a server. On iOS and macOS, deleting the app reclaims
+            the space.
+          </p>
+          <p>
+            In the web version, the Storage section in Settings shows what the models are
+            using and removes any of them. The quality extras are nearly half of the total
+            and face swapping still works without them; removing anything else stops face
+            swapping until you download it again. Clearing this site&rsquo;s data in the
+            browser removes the models and your settings completely.
           </p>
           <p>
             What Morphiqo does and does not touch is set out in full in the{' '}

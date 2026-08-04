@@ -35,11 +35,14 @@ import {
 
 import { TargetMedia } from './media'
 import { ModelStore } from './model-store'
+import { REMOVAL_REFUSED } from './protocol'
 import type {
   EngineEvent,
   EngineRequest,
   ExportProgress,
+  ModelLibraryStatus,
   RequestEnvelope,
+  RequestType,
   ResponseEnvelope,
   ScanProgress,
   ScannedPerson,
@@ -76,12 +79,60 @@ let loader: ModelLoader | null = null
 /** Cancellation, keyed by the request id the page used. */
 const inFlight = new Map<number, AbortController>()
 
+/**
+ * Requests that are reading the loaded sessions right now.
+ *
+ * Messages are dispatched as they arrive, so a `removeModel` can land in the
+ * middle of a preview swap. Releasing a session out from under a `run` that is
+ * already queued behind the serializer is not something ONNX Runtime promises
+ * anything about, so a removal waits for these to settle instead of finding out.
+ * The long jobs are not in here — they are refused outright, since waiting a
+ * whole export out is not waiting, it is hanging.
+ */
+const usingPipeline = new Set<Promise<unknown>>()
+
+const PIPELINE_REQUESTS: ReadonlySet<RequestType> = new Set<RequestType>([
+  'prepare',
+  'analyzeSource',
+  'detectFaces',
+  'analyzeFaces',
+  'swapFrame',
+  'exportImage',
+])
+
+/**
+ * Set while the sessions are being released and the files deleted.
+ *
+ * `usingPipeline` accounts for the work that was already running; this accounts
+ * for the work that has not been asked for yet, and the two are not the same
+ * problem. The page does stop dispatching on its own — every route into the
+ * pipeline is behind an engine state it moves to `preparing` first — but a
+ * caller's good behaviour is not a guarantee, and the window is real rather than
+ * theoretical: `unloadAll` awaits `release()` on each session in turn, and for
+ * the length of that loop the pipeline still reads as prepared while its
+ * sessions are going away. A frame arriving in there would run against a session
+ * that has already been released. Refusing is the honest answer, and it is one
+ * the page already knows how to recover from.
+ */
+let sessionsLocked = false
+
 // MARK: - Dispatch
 
 self.onmessage = async (event: MessageEvent<RequestEnvelope>) => {
   const { id, request } = event.data
+  const work = handle(id, request)
+  if (PIPELINE_REQUESTS.has(request.type)) {
+    // Tracked as a settled promise: a failed frame still finished with the
+    // sessions, and a rejection nobody awaited here would be unhandled.
+    const settled = work.then(
+      () => undefined,
+      () => undefined,
+    )
+    usingPipeline.add(settled)
+    void settled.then(() => usingPipeline.delete(settled))
+  }
   try {
-    const { value, transfer } = await handle(id, request)
+    const { value, transfer } = await work
     post({ id, ok: true, value }, transfer ?? [])
   } catch (error) {
     post({ id, ok: false, error: serializeError(error) })
@@ -94,6 +145,10 @@ async function handle(
   id: number,
   request: EngineRequest,
 ): Promise<{ value: unknown; transfer?: Transferable[] }> {
+  if (sessionsLocked && PIPELINE_REQUESTS.has(request.type)) {
+    throw new EngineError('notPrepared', 'the models are being removed')
+  }
+
   switch (request.type) {
     case 'loadManifest':
       return { value: await store.loadManifest() }
@@ -105,7 +160,10 @@ async function handle(
       return { value: store.cancel() }
 
     case 'removeModel':
-      return { value: await store.remove(request.id) }
+      return { value: await withSessionsReleased(() => store.remove(request.id)) }
+
+    case 'removeAllModels':
+      return { value: await withSessionsReleased(() => store.removeAll()) }
 
     case 'refreshLibrary':
       return { value: await store.refresh() }
@@ -195,6 +253,75 @@ async function handle(
     case 'cancel':
       inFlight.get(request.id)?.abort()
       return { value: undefined }
+  }
+}
+
+// MARK: - Removing models
+
+/**
+ * Deletes model files with no session left holding one.
+ *
+ * The macOS app does the same thing in the same order — `SettingsView` awaits
+ * `engine.unloadModels()` before `manager.removeAll()`, on the grounds that a
+ * live session has its graphs mapped and deleting the file underneath it leaves
+ * it working from a file with no name. Here the sessions are built from a buffer
+ * rather than mapped, so the file is not the hazard; what is, is the engine
+ * carrying on afterwards with a model the library now says is gone. The optional
+ * two are where that bites: the pipeline treats a missing enhancer as "do not
+ * enhance", but a *deleted* one whose session is still loaded is not missing, so
+ * the app would go on enhancing every frame of an export while the library, the
+ * storage panel and the toggle all agreed it had been removed.
+ *
+ * So both problems get the same answer as macOS: release everything, then
+ * delete. The page rebuilds the engine from what is left — which is also the
+ * only way the *required* case can be correct, since there is no engine to
+ * rebuild until those weights come back.
+ */
+async function withSessionsReleased(deletion: () => Promise<ModelLibraryStatus>) {
+  refuseWhileBusy()
+  // Nothing has been released or deleted at this point, so a caller that sees
+  // this reject can go on using the engine it already had.
+  await Promise.all([...usingPipeline])
+  // Waiting is itself a window: a scan can be asked for while a preview swap is
+  // being waited out, and that one would still be running when the sessions go.
+  refuseWhileBusy()
+
+  sessionsLocked = true
+  try {
+    await pipeline.unloadAll()
+    loader = null
+    return await deletion()
+  } finally {
+    sessionsLocked = false
+  }
+}
+
+/**
+ * The one place a removal is allowed to say no.
+ *
+ * Every reason lives here rather than being spread down the call, because *when*
+ * the refusal happens is load-bearing: `RemovalRefused` promises the page that
+ * nothing was released and nothing was deleted, and that promise only holds
+ * while this runs ahead of `unloadAll`. `ModelStore` guards the directory again
+ * on its own account, but that guard runs after the sessions are gone — a
+ * refusal that has already torn the engine down is not a refusal, so the
+ * download is caught here too.
+ */
+function refuseWhileBusy() {
+  if (inFlight.size > 0) {
+    throw new RemovalRefused(
+      'Finish or cancel the job that is running before removing models.',
+    )
+  }
+  if (store.isBusy) {
+    throw new RemovalRefused('Finish or cancel the download before removing models.')
+  }
+}
+
+class RemovalRefused extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RemovalRefused'
   }
 }
 
@@ -442,6 +569,9 @@ function toTransferable(image: RGBAImage): TransferableImage {
 }
 
 function serializeError(error: unknown) {
+  if (error instanceof RemovalRefused) {
+    return { message: error.message, code: REMOVAL_REFUSED }
+  }
   if (error instanceof EngineError) {
     return { message: error.message, code: error.code, detail: error.detail }
   }

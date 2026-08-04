@@ -6,8 +6,9 @@
  * First run: explain what is about to be downloaded, then download it.
  *
  * This is the only moment the app needs a network connection, so it says so
- * plainly rather than leaving the user to wonder. It is also the only screen
- * where the licensing of the models is unavoidable, which is deliberate.
+ * plainly rather than leaving the user to wonder. What each model is called is
+ * what it does — never what it is or where it came from — and this is the screen
+ * every user sees, so it is the one that rule has to hold on hardest.
  */
 
 import { useMemo, useState } from 'react'
@@ -180,8 +181,11 @@ function ModelRow({
 
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
+          {/* No fallback to the id. A display name missing from the map is a bug
+              in the map, and printing the id instead would put the name of a
+              model on the one screen every user sees. */}
           <span className="truncate text-[13px] font-medium text-ink-100">
-            {MODEL_DISPLAY_NAME[id] ?? descriptor.id}
+            {MODEL_DISPLAY_NAME[id]}
           </span>
           {!descriptor.required ? (
             <span className="rounded-full bg-ink-700 px-1.5 py-px text-[10px] font-medium text-ink-300">
@@ -190,7 +194,7 @@ function ModelRow({
           ) : null}
         </span>
         <span className="block truncate text-[11.5px] text-ink-400">
-          {MODEL_PURPOSE[id] ?? ''}
+          {MODEL_PURPOSE[id]}
         </span>
       </span>
 

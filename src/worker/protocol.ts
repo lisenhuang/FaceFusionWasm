@@ -148,6 +148,14 @@ export type EngineRequest =
   | { type: 'installModels'; ids: ModelID[] }
   | { type: 'cancelInstall' }
   | { type: 'removeModel'; id: ModelID }
+  /**
+   * Empties the model directory rather than deleting the manifest's five files
+   * one by one. Reclaiming "everything" has to mean everything: a superseded
+   * generation the sweep never reached, a partial nobody is going to finish, the
+   * adoption record. Removing only what the manifest names would leave those
+   * behind and report space freed that is still occupied.
+   */
+  | { type: 'removeAllModels' }
   | { type: 'refreshLibrary' }
   | { type: 'prepare'; compute: ComputePolicy }
   | { type: 'analyzeSource'; image: TransferableImage; refineLandmarks: boolean }
@@ -172,6 +180,7 @@ export interface EngineResponses {
   installModels: ModelLibraryStatus
   cancelInstall: ModelLibraryStatus
   removeModel: ModelLibraryStatus
+  removeAllModels: ModelLibraryStatus
   refreshLibrary: ModelLibraryStatus
   prepare: EnginePreparation
   analyzeSource: SourceAnalysis
@@ -214,6 +223,18 @@ export interface SerializedError {
   code?: string
   detail?: string
 }
+
+/**
+ * The code a removal that declined to start comes back with.
+ *
+ * It separates "nothing happened" from "something happened and then failed",
+ * which is the only question the page can act on: a refusal is raised before a
+ * single session is released, so the engine the page already had is still
+ * exactly the engine the worker holds. Any other failure reaches the page with
+ * the sessions already gone, and carrying on as if they were not would leave
+ * every control enabled over a pipeline that is not there.
+ */
+export const REMOVAL_REFUSED = 'removalRefused'
 
 export function isEventEnvelope(
   message: ResponseEnvelope,
