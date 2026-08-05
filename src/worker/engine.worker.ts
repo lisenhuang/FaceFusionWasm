@@ -27,7 +27,9 @@ import { SwapPipeline } from '@/engine/pipeline'
 import { Serializer, makeLoader, type ModelLoader, type OrtNamespace } from '@/engine/runtime'
 import {
   type ComputePolicy,
+  type EngineFootprint,
   type ModelID,
+  ModelRole,
   REQUIRED_MODELS,
   type SwapOptions,
   EngineError,
@@ -169,7 +171,7 @@ async function handle(
       return { value: await store.refresh() }
 
     case 'prepare':
-      return { value: await prepare(request.compute) }
+      return { value: await prepare(request.compute, request.footprint) }
 
     case 'analyzeSource':
       return {
@@ -340,7 +342,21 @@ const BASE_SESSION_OPTIONS = {
   logSeverityLevel: 3,
 } as const
 
-async function prepare(compute: ComputePolicy) {
+/**
+ * What the runtime gives up when the last launch did not come back.
+ *
+ * Both of these trade memory for speed by holding on to what a run allocated:
+ * the arena keeps freed blocks rather than returning them, and the pattern
+ * planner pre-allocates the shapes a graph is expected to want. On a device that
+ * has already failed to load the library at all, that is the wrong side of the
+ * trade.
+ */
+const LEAN_SESSION_OPTIONS = {
+  enableCpuMemArena: false,
+  enableMemPattern: false,
+} as const
+
+async function prepare(compute: ComputePolicy, footprint: EngineFootprint) {
   await store.loadManifest()
   await store.refresh()
 
@@ -350,14 +366,50 @@ async function prepare(compute: ComputePolicy) {
   }
 
   const installed = new Set(store.installedIDs())
-  loader = await makeBestLoader(compute)
+  // The two optional models are 438 MB of the 903 MB library, and preparation is
+  // where a phone runs out of room. Leaving them on disk rather than in the
+  // runtime's heap is the largest thing that can be given up while the app still
+  // swaps a face.
+  const wanted: Set<ModelID> =
+    footprint === 'minimal' ? new Set(REQUIRED_MODELS) : installed
+
+  const use = (id: ModelID) => installed.has(id) && wanted.has(id)
+
+  // The order the pipeline loads in, so "2 of 3" counts the same models it does.
+  const plan = [
+    ...REQUIRED_MODELS,
+    ModelRole.faceLandmarker,
+    ModelRole.faceEnhancer,
+  ].filter(use)
+
+  let loaded = 0
+  const report = (stage: 'reading' | 'building', model: ModelID) =>
+    emit({ kind: 'engine', progress: { stage, model, loaded, total: plan.length } })
+
+  const base = await makeBestLoader(compute, footprint)
+  // Wrapped rather than reported from inside the pipeline, so `src/engine/` stays
+  // free of anything that knows there is a page listening.
+  loader = {
+    get provider() {
+      return base.provider
+    },
+    usingGPU: base.usingGPU,
+    async load(id, modelBytes, options) {
+      report('building', id)
+      const model = await base.load(id, modelBytes, options)
+      loaded += 1
+      return model
+    },
+  }
 
   // Read one model at a time, straight from OPFS into the session builder. The
   // buffer goes out of scope as soon as the session exists, so the peak is one
   // model plus the runtime's copy of it rather than all five at once.
-  return pipeline.prepare(loader, async (id) =>
-    installed.has(id) ? await store.read(id) : null,
-  )
+  return pipeline.prepare(loader, async (id) => {
+    if (!use(id)) return null
+    report('reading', id)
+    return store.read(id)
+  })
 }
 
 /**
@@ -369,23 +421,38 @@ async function prepare(compute: ComputePolicy) {
  * retried on WASM rather than surfaced, because "slower" is a far better outcome
  * than "does not run".
  */
-async function makeBestLoader(compute: ComputePolicy): Promise<ModelLoader> {
+async function makeBestLoader(
+  compute: ComputePolicy,
+  footprint: EngineFootprint,
+): Promise<ModelLoader> {
   const namespace = ort as unknown as OrtNamespace
   // One queue for every session the app builds, whichever backend they land on:
   // they share a single runtime module, so the turn-taking has to be global.
   const serializer = new Serializer()
 
+  const lean = footprint === 'minimal'
+  const sessionOptions = lean
+    ? { ...BASE_SESSION_OPTIONS, ...LEAN_SESSION_OPTIONS }
+    : BASE_SESSION_OPTIONS
+
   const wasmLoader = makeLoader(
     namespace,
-    { ...BASE_SESSION_OPTIONS, executionProviders: ['wasm'] },
+    { ...sessionOptions, executionProviders: ['wasm'] },
     {
-      provider:
-        (ort.env.wasm.numThreads ?? 1) > 1 ? 'WebAssembly (multi-threaded)' : 'WebAssembly',
+      provider: `${
+        (ort.env.wasm.numThreads ?? 1) > 1 ? 'WebAssembly (multi-threaded)' : 'WebAssembly'
+      }${lean ? ' · reduced' : ''}`,
       usingGPU: false,
     },
     serializer,
   )
-  if (compute === 'wasm') return wasmLoader
+  // A launch that did not survive its last preparation does not get handed the
+  // GPU on the way back, whatever it asked for. A weight buffer larger than the
+  // adapter will allocate is one of the few things that can take a page down
+  // without an error to catch, and the CPU backend is the floor every browser
+  // running this app is guaranteed to have. The badge says "reduced" so this is
+  // not a silent demotion.
+  if (compute === 'wasm' || lean) return wasmLoader
   if (!(await hasWebGPU())) {
     if (compute === 'webgpu') throw new EngineError('modelLoadFailed', 'WebGPU is unavailable')
     return wasmLoader
@@ -393,7 +460,7 @@ async function makeBestLoader(compute: ComputePolicy): Promise<ModelLoader> {
 
   const gpuLoader = makeLoader(
     namespace,
-    { ...BASE_SESSION_OPTIONS, executionProviders: ['webgpu'] },
+    { ...sessionOptions, executionProviders: ['webgpu'] },
     { provider: 'WebGPU', usingGPU: true },
     serializer,
   )

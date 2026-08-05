@@ -112,9 +112,19 @@ export class EngineClient {
     this.send({ type: 'cancel', id })
   }
 
-  terminate() {
+  /**
+   * Drops the worker, and fails everything that was waiting on it.
+   *
+   * Rejecting rather than clearing is the whole point. A pending entry is a
+   * promise some caller is awaiting, and a promise that is neither resolved nor
+   * rejected is a UI that waits for the rest of the session — which is precisely
+   * the state this method is usually called to get out of.
+   */
+  terminate(reason = 'The engine was stopped.') {
     this.worker?.terminate()
     this.worker = null
+    const error = new Error(reason)
+    for (const entry of this.pending.values()) entry.reject(error)
     this.pending.clear()
   }
 }

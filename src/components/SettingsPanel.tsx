@@ -15,7 +15,8 @@ import {
   type FaceSelection,
 } from '@/engine/types'
 import { duration } from '@/lib/format'
-import { faceMode, isInstalled, useStore, type FaceMode } from '@/lib/store'
+import { faceMode, isInstalled, isUsable, useStore, type FaceMode } from '@/lib/store'
+import type { EnginePrepareProgress } from '@/worker/protocol'
 import { FacePicker } from './FacePicker'
 import { MediaWell } from './MediaWell'
 import { StoragePanel } from './StoragePanel'
@@ -48,6 +49,9 @@ export function SettingsPanel() {
   const enhanceFace = useStore((state) => state.enhanceFace)
   const useHEVC = useStore((state) => state.useHEVC)
   const enhancerInstalled = useStore((state) => isInstalled(state, 'gfpgan_1.4'))
+  // Installed and loaded are not the same thing once preparation has had to run
+  // with a reduced footprint: the file is there, the session is not.
+  const enhancerUsable = useStore((state) => isUsable(state, 'gfpgan_1.4'))
   const engineReady = useStore((state) => state.engine.kind === 'ready')
 
   const chooseSource = useStore((state) => state.chooseSource)
@@ -146,14 +150,16 @@ export function SettingsPanel() {
         />
 
         <Toggle
-          checked={enhanceFace && enhancerInstalled}
-          disabled={!enhancerInstalled}
+          checked={enhanceFace && enhancerUsable}
+          disabled={!enhancerUsable}
           onChange={setEnhanceFace}
           title="Enhance detail"
           hint={
-            enhancerInstalled
+            enhancerUsable
               ? 'Sharper skin and eyes. Slower.'
-              : `Needs the ${MODEL_DISPLAY_NAME['gfpgan_1.4']}, which is not installed. Add it under Storage.`
+              : enhancerInstalled
+                ? `The ${MODEL_DISPLAY_NAME['gfpgan_1.4']} is installed but not loaded: this device did not have the memory for it. Removing it under Storage frees the space.`
+                : `Needs the ${MODEL_DISPLAY_NAME['gfpgan_1.4']}, which is not installed. Add it under Storage.`
           }
         />
 
@@ -252,7 +258,12 @@ function EngineBadge() {
       ) : engine.kind === 'preparing' ? (
         <>
           <Spinner className="h-3.5 w-3.5" />
-          <span>Starting engine…</span>
+          {/* Naming the model being loaded is not decoration. Preparation is
+              minutes of work on a phone, and "Starting engine…" for four of them
+              is indistinguishable from an engine that has died — which is a
+              thing that happens, and which the page now has to be able to show
+              the difference from. */}
+          <span>{preparingCaption(engine.progress)}</span>
         </>
       ) : engine.kind === 'failed' ? (
         <>
@@ -267,6 +278,15 @@ function EngineBadge() {
 }
 
 // MARK: - Captions
+
+function preparingCaption(progress: EnginePrepareProgress | null): string {
+  if (!progress) return 'Starting engine…'
+  const name = MODEL_DISPLAY_NAME[progress.model]
+  const counted = `${Math.min(progress.loaded + 1, progress.total)} of ${progress.total}`
+  return progress.stage === 'reading'
+    ? `Reading ${name} — ${counted}`
+    : `Loading ${name} — ${counted}`
+}
 
 function sourceCaption({
   sourceName,

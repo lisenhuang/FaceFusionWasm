@@ -16,6 +16,7 @@ import { create } from 'zustand'
 import {
   type AnalysisOptions,
   type DetectedFace,
+  type EngineFootprint,
   type EnginePreparation,
   type FaceIdentity,
   type FaceSelection,
@@ -33,6 +34,7 @@ import {
 } from './engine-client'
 import { REMOVAL_REFUSED } from '@/worker/protocol'
 import type {
+  EnginePrepareProgress,
   ExportProgress,
   ModelLibraryStatus,
   ModelManifest,
@@ -58,11 +60,94 @@ const PREVIEW_DIMENSION = 1920
 const wasRefused = (error: unknown) =>
   error instanceof EngineRequestError && error.code === REMOVAL_REFUSED
 
+/**
+ * Where the last preparation attempt is written down.
+ *
+ * Loading the library is the one thing this app does that can take the page down
+ * with it rather than throw. Hundreds of megabytes of weights land in the
+ * runtime's heap over a few seconds, and a browser that will not give up that
+ * much memory kills the tab instead of failing a call — there is no rejected
+ * promise, no `error` event, nothing to catch, and on iOS the whole studio is
+ * replaced by the browser's own "Can't open this page". What the user does next
+ * is open it again, which does exactly the same thing.
+ *
+ * So the attempt is recorded before it starts and cleared when it comes back,
+ * whether it succeeded or threw — a thrown error means the page is alive to
+ * report it, which is not this. A marker still sitting there at the next launch
+ * is a launch that never returned, and the one after it asks for less. A second
+ * failure stops asking.
+ *
+ * `localStorage` for two reasons: it is synchronous, so the write is on disk
+ * before the work that might kill the process begins, and it outlives the
+ * renderer that wrote it.
+ */
+const ATTEMPT_KEY = 'morphiqo.engine-attempt'
+
+function lastAttempt(): EngineFootprint | null {
+  try {
+    const value = localStorage.getItem(ATTEMPT_KEY)
+    return value === 'full' || value === 'minimal' ? value : null
+  } catch {
+    // Storage disabled or partitioned away. Losing the guard means losing the
+    // recovery, not the app: without it every launch is simply a full one.
+    return null
+  }
+}
+
+function markAttempt(footprint: EngineFootprint | null) {
+  try {
+    if (footprint) localStorage.setItem(ATTEMPT_KEY, footprint)
+    else localStorage.removeItem(ATTEMPT_KEY)
+  } catch {
+    // As above.
+  }
+}
+
+/**
+ * What the page says when neither the full library nor the smallest one it can
+ * run on survived being loaded.
+ *
+ * Deliberately about what to do rather than what went wrong: the quality extras
+ * are 438 MB of the 903 MB library and removing them is the one lever the user
+ * has left.
+ */
+const OUT_OF_MEMORY_MESSAGE =
+  'This device ran out of memory loading the models — twice, the second time with ' +
+  'only the essentials. Removing the quality extras in Storage frees the most, but ' +
+  'this browser may not have the memory to run the studio at all.'
+
+const ENGINE_STALLED_MESSAGE =
+  'The engine stopped responding while loading the models, which is what running ' +
+  'out of memory looks like from here. Removing the quality extras in Storage is ' +
+  'the largest thing that can be freed.'
+
+/**
+ * How long preparation may say nothing before it is presumed dead.
+ *
+ * Measured between signals, not from the start: every model reports twice, so a
+ * phone that needs four minutes for the library still resets this eight times.
+ * What it is really waiting out is the longest single session build, because
+ * that is the one stretch with nothing to report — hence a threshold generous
+ * enough to be embarrassing on a fast machine and still finite on a dead one.
+ *
+ * The alternative, pinging the worker, does not work here: a worker busy inside
+ * a synchronous stretch of WebAssembly does not answer, and cannot be told apart
+ * from one the browser has already shut down.
+ */
+const PREPARE_SILENCE_MS = 120_000
+
+class EngineStalled extends Error {
+  constructor() {
+    super(ENGINE_STALLED_MESSAGE)
+    this.name = 'EngineStalled'
+  }
+}
+
 export type FaceMode = 'everyFace' | 'oneFace' | 'chosen'
 
 export type EngineState =
   | { kind: 'idle' }
-  | { kind: 'preparing' }
+  | { kind: 'preparing'; progress: EnginePrepareProgress | null }
   | { kind: 'ready'; preparation: EnginePreparation }
   | { kind: 'failed'; message: string }
 
@@ -180,6 +265,8 @@ const client = new EngineClient()
 
 // Values that are plumbing rather than state: changing them must never repaint.
 let referenceGeneration = 0
+/** When preparation last proved it was alive. See `PREPARE_SILENCE_MS`. */
+let lastEngineSignal = 0
 let previewToken = 0
 let previewTimer: ReturnType<typeof setTimeout> | null = null
 let scanRequestID: number | null = null
@@ -194,7 +281,7 @@ export const useStore = create<Store>()((set, get) => {
     return {
       selection: state.faceSelection,
       identityStrength: state.identityStrength,
-      enhanceFace: state.enhanceFace && isInstalled(state, 'gfpgan_1.4'),
+      enhanceFace: state.enhanceFace && isUsable(state, 'gfpgan_1.4'),
       enhancementBlend: 0.8,
       maskBlur: state.maskBlur,
       detectorScore: 0.5,
@@ -381,7 +468,56 @@ export const useStore = create<Store>()((set, get) => {
    * fails with "no face was found in the source image", and nothing short of
    * removing and re-adding the photo recovers it.
    */
+  /**
+   * One preparation attempt, watched for signs of life.
+   *
+   * The worker is where the weights actually land, and a browser under memory
+   * pressure will shut a worker down on its own — without an `error` at the
+   * page, which is a `postMessage` whose reply never comes. The page cannot
+   * distinguish that from a slow phone by waiting, because waiting is what both
+   * look like; it can only distinguish them by what arrives while it waits.
+   *
+   * So preparation reports per model, and a stretch of silence longer than any
+   * single model's build is taken as the worker being gone. The response is to
+   * drop it and ask for less, in this session rather than after a reload the
+   * user has no reason to think would help.
+   */
+  const prepareEngine = async (footprint: EngineFootprint): Promise<EnginePreparation> => {
+    set({ engine: { kind: 'preparing', progress: null } })
+    markAttempt(footprint)
+    lastEngineSignal = Date.now()
+
+    let watchdog: ReturnType<typeof setInterval> | null = null
+    const stalled = new Promise<never>((_, reject) => {
+      watchdog = setInterval(() => {
+        if (Date.now() - lastEngineSignal >= PREPARE_SILENCE_MS) reject(new EngineStalled())
+      }, 5_000)
+    })
+
+    try {
+      return await Promise.race([
+        client.send({ type: 'prepare', compute: 'auto', footprint }),
+        stalled,
+      ])
+    } catch (error) {
+      if (!(error instanceof EngineStalled)) throw error
+      // Nothing is coming back from that worker, and it may still be holding
+      // most of a gigabyte. Dropping it also rejects the request it was serving,
+      // which is what stops the studio waiting for the rest of the session.
+      client.terminate(ENGINE_STALLED_MESSAGE)
+      if (footprint === 'minimal') throw error
+      return prepareEngine('minimal')
+    } finally {
+      if (watchdog) clearInterval(watchdog)
+    }
+  }
+
   const restartEngine = async () => {
+    // The library just changed, so what preparation is about to attempt is not
+    // what failed last time. Whatever it was told to give up, it gets back — and
+    // this is the way out of a refusal: remove the extras, and the engine tries
+    // again with the set that is actually left.
+    markAttempt(null)
     set({ engine: { kind: 'idle' }, sourceFace: null, sourceFaceCount: 0 })
     invalidatePreviewResult()
     await get().startEngine()
@@ -411,7 +547,7 @@ export const useStore = create<Store>()((set, get) => {
     const hadSourceFace = Boolean(get().sourceFace)
     set({
       libraryBusy: true,
-      engine: { kind: 'preparing' },
+      engine: { kind: 'preparing', progress: null },
       sourceFace: null,
       sourceFaceCount: 0,
       statusMessage: null,
@@ -423,6 +559,8 @@ export const useStore = create<Store>()((set, get) => {
       const manifest = get().manifest
       set({ library, modelsReady: requiredInstalled(manifest, library) })
       if (requiredInstalled(manifest, library)) {
+        // As in `restartEngine`: a smaller library earns a fresh attempt at it.
+        markAttempt(null)
         set({ engine: { kind: 'idle' } })
         await get().startEngine()
       } else {
@@ -466,6 +604,14 @@ export const useStore = create<Store>()((set, get) => {
           library: event.status,
           modelsReady: requiredInstalled(get().manifest, event.status),
         })
+        break
+      case 'engine':
+        // Proof of life first, repaint second: the watchdog is reset even when
+        // the page has moved on and there is no `preparing` state to update.
+        lastEngineSignal = Date.now()
+        if (get().engine.kind === 'preparing') {
+          set({ engine: { kind: 'preparing', progress: event.progress } })
+        }
         break
       case 'scan':
         set({ scanProgress: event.progress })
@@ -594,9 +740,18 @@ export const useStore = create<Store>()((set, get) => {
 
     async startEngine() {
       if (get().engine.kind === 'preparing' || get().engine.kind === 'ready') return
-      set({ engine: { kind: 'preparing' } })
+
+      // Whatever the previous launch was doing when it disappeared, it was this.
+      const previous = lastAttempt()
+      if (previous === 'minimal') {
+        set({ engine: { kind: 'failed', message: OUT_OF_MEMORY_MESSAGE } })
+        return
+      }
+      const first: EngineFootprint = previous === 'full' ? 'minimal' : 'full'
+
       try {
-        const preparation = await client.send({ type: 'prepare', compute: 'auto' })
+        const preparation = await prepareEngine(first)
+        markAttempt(null)
         set({ engine: { kind: 'ready', preparation }, statusMessage: null })
         // A source chosen before the engine was up still needs encoding, and a
         // fresh engine holds no reference identities — it dropped them along
@@ -605,6 +760,18 @@ export const useStore = create<Store>()((set, get) => {
         if (get().faceSelection.kind === 'reference') await applyCheckedFaces()
         else await detectPreviewFaces()
       } catch (error) {
+        if (error instanceof EngineStalled) {
+          // The marker is deliberately left where it is. A launch that had to be
+          // given up on is not one to repeat at the same size, and this is the
+          // same conclusion the localStorage guard reaches after a renderer that
+          // never came back — reached here without needing the user to reload.
+          set({ engine: { kind: 'failed', message: error.message } })
+          return
+        }
+        // A rejection is not a crash: the page is still here to report it, so the
+        // next launch starts from a clean slate rather than inheriting a downgrade
+        // for something that had nothing to do with memory.
+        markAttempt(null)
         const message = error instanceof Error ? error.message : String(error)
         set({ engine: { kind: 'failed', message } })
       }
@@ -1142,6 +1309,24 @@ export function selectedFaceIndices(state: SelectionInput): Set<number> {
 
 export function isInstalled(state: Pick<Store, 'library'>, id: ModelID): boolean {
   return state.library?.states[id]?.kind === 'installed'
+}
+
+/**
+ * Whether the engine can actually use a model, as opposed to owning the file.
+ *
+ * The two came apart when preparation grew a reduced footprint: after a launch
+ * that ran out of memory, the optional models stay on disk and are deliberately
+ * not loaded. A control gated on the library alone would sit there enabled over
+ * a pipeline that has no such session — which is the enhancer toggle claiming to
+ * enhance and quietly doing nothing.
+ *
+ * Before the engine is ready there is nothing better than the library to go on,
+ * and saying "installed" there is right: it is what the next preparation will
+ * try to load.
+ */
+export function isUsable(state: Pick<Store, 'library' | 'engine'>, id: ModelID): boolean {
+  if (state.engine.kind === 'ready') return state.engine.preparation.loadedModels.includes(id)
+  return isInstalled(state, id)
 }
 
 /**

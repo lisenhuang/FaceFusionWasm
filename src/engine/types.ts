@@ -58,6 +58,17 @@ export const MODEL_PURPOSE: Record<ModelID, string> = {
  */
 export type ComputePolicy = 'auto' | 'webgpu' | 'wasm'
 
+/**
+ * How much of the library to hold in memory at once.
+ *
+ * `full` is every installed model on the best backend available. `minimal` is
+ * what a launch falls back to after one that did not survive preparation: the
+ * three required models only, on the CPU backend, with the runtime's arenas off.
+ * It cannot enhance and it is slower, and on a phone it is the difference
+ * between an app that starts and a tab that dies.
+ */
+export type EngineFootprint = 'full' | 'minimal'
+
 export interface EnginePreparation {
   loadedModels: ModelID[]
   /** True when WebGPU accepted the graphs; false means the WASM CPU backend. */

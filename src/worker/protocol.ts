@@ -21,6 +21,7 @@ import type {
   AnalysisOptions,
   ComputePolicy,
   DetectedFace,
+  EngineFootprint,
   EnginePreparation,
   FaceIdentity,
   ModelID,
@@ -157,7 +158,7 @@ export type EngineRequest =
    */
   | { type: 'removeAllModels' }
   | { type: 'refreshLibrary' }
-  | { type: 'prepare'; compute: ComputePolicy }
+  | { type: 'prepare'; compute: ComputePolicy; footprint: EngineFootprint }
   | { type: 'analyzeSource'; image: TransferableImage; refineLandmarks: boolean }
   | { type: 'clearSource' }
   | { type: 'detectFaces'; image: TransferableImage; detectorScore: number }
@@ -200,8 +201,28 @@ export interface EngineResponses {
 
 // MARK: - Events pushed from the worker
 
+/**
+ * Where preparation has got to.
+ *
+ * Emitted per model rather than reported once at the end, for two reasons that
+ * are really the same reason. A user watching "Starting engine…" for four
+ * minutes cannot tell a slow phone from a dead worker, and neither can the page:
+ * a worker the browser shuts down under memory pressure does not always fire an
+ * `error` at its parent, so the request it was serving simply never settles.
+ * A signal per model is what makes silence mean something.
+ */
+export interface EnginePrepareProgress {
+  /** Reading the weights off disk, or handing them to the runtime. */
+  stage: 'reading' | 'building'
+  model: ModelID
+  /** Models finished so far, and how many this preparation will load in total. */
+  loaded: number
+  total: number
+}
+
 export type EngineEvent =
   | { kind: 'library'; status: ModelLibraryStatus }
+  | { kind: 'engine'; progress: EnginePrepareProgress }
   | { kind: 'scan'; progress: ScanProgress }
   | { kind: 'export'; progress: ExportProgress }
   | { kind: 'log'; message: string }
