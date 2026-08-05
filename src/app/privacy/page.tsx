@@ -118,14 +118,21 @@ export default function PrivacyPage() {
         <p>
           Morphiqo needs its AI models before it can run, and those are too large to ship
           inside the app. On first launch it downloads them over HTTPS from third-party
-          file hosting.
+          file hosting — roughly 900 MB, once.
+        </p>
+        <p>
+          The direction is the whole point, so it is worth stating plainly: this is a
+          download and nothing else. The app asks for a fixed list of files and receives
+          them. Those requests have no body, so there is nothing for your media to be
+          carried in even in principle. Bytes travel towards your device and never away
+          from it. The models come to your media; your media never goes to a model.
         </p>
         <p>
           Every byte is checked against a SHA-256 digest before use, and anything that does
           not match is discarded. Those hosts are operated by third parties and, like any
-          web server, will see the IP address making the request. That request is an
-          ordinary file download: it carries nothing about you, and none of your media is
-          part of it.
+          web server, will see the IP address that asked for a file — the same thing that
+          happens when you download anything at all. They see nothing else about you, and
+          none of your media is part of the request.
         </p>
         <p>
           After the download completes, the app works with the network switched off
