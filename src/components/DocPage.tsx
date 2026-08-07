@@ -19,7 +19,7 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 
 /** Where support mail goes. One constant, referenced by both documents. */
-export const CONTACT_EMAIL = 'aifydotnz+morphiqo@gmail.com'
+export const CONTACT_EMAIL = 'support@morphiqo.app'
 
 /**
  * The date shown as "last updated". Hardcoded rather than `new Date()`: a

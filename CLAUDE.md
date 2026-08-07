@@ -85,7 +85,7 @@ commit is warranted; do not assume.
 
 When I ask you to commit, **the author and the committer are me, not you.** Take
 the identity from the repository's own configuration — `git config user.name`
-and `git config user.email`, currently `Ethan <lisen8018@gmail.com>` — and do
+and `git config user.email`, currently `Ethan <support@morphiqo.app>` — and do
 nothing that changes it:
 
 - **Do not pass `--author`.** Do not set `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
