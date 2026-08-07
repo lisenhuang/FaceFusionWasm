@@ -18,7 +18,7 @@
  * rather than editing this file.
  */
 export const SITE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? 'https://morphiqo.vercel.app'
+  process.env.NEXT_PUBLIC_SITE_URL ?? 'https://morphiqo.app'
 ).replace(/\/$/, '')
 
 export const SITE_NAME = 'Morphiqo'
